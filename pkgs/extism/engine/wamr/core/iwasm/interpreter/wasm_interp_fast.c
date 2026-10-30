@@ -1596,6 +1596,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 
 #if WASM_ENABLE_LABELS_AS_VALUES == 0
     while (frame_ip < frame_ip_end) {
+        /* moonrockz/extism: meter the switch dispatch too (UPSTREAM.md). */
+        CHECK_INSTRUCTION_LIMIT();
         opcode = *frame_ip++;
 #if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
         frame_ip++;

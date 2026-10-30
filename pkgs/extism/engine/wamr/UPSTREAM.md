@@ -11,6 +11,10 @@ builds with no include path. `extism_config.h` holds the build settings.
 - Tag: `WAMR-2.4.5`
 - Commit: `25bd7eb63e828e4bd242cc9b38d260b4b31c6605`
 
+## Patches
+
+- `core/iwasm/interpreter/wasm_interp_fast.c`: The switch dispatch of the fast interpreter, which compilers with no computed goto use (MSVC), does not meter instructions; it runs CHECK_INSTRUCTION_LIMIT for each instruction, as the computed-goto dispatch does.
+
 ## Translation units
 
 - `wamr/unit/wamr_wasm_application.c`

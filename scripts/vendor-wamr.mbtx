@@ -264,6 +264,56 @@ test "rewrite makes include-directory includes relative" {
 }
 
 ///|
+/// The patches that the engine needs in the WAMR source: the file, the upstream text and its
+/// replacement. UPSTREAM.md lists them.
+let patches : Array[(String, String, String, String)] = [
+  (
+    "iwasm/interpreter/wasm_interp_fast.c",
+    "The switch dispatch of the fast interpreter, which compilers with no computed goto use (MSVC), " +
+    "does not meter instructions; it runs CHECK_INSTRUCTION_LIMIT for each instruction, as the " +
+    "computed-goto dispatch does.",
+    "    while (frame_ip < frame_ip_end) {\n        opcode = *frame_ip++;\n",
+    "    while (frame_ip < frame_ip_end) {\n        /* moonrockz/extism: meter the switch dispatch too (UPSTREAM.md). */\n        CHECK_INSTRUCTION_LIMIT();\n        opcode = *frame_ip++;\n",
+  ),
+]
+
+///|
+/// The source of `file` with its patches. A patch whose upstream text is not in the file, or is there
+/// more than once, is an error.
+fn patch(file : String, source : String) -> String raise VendorError {
+  let mut text = source
+  for entry in patches {
+    let (target, _, before, after) = entry
+    guard target == file else { continue }
+    let parts = text.split(before).collect()
+    guard parts.length() == 2 else {
+      raise VendorError(
+        "the patch of \{file} does not match its upstream text once",
+      )
+    }
+    text = parts[0].to_owned() + after + parts[1].to_owned()
+  }
+  text
+}
+
+///|
+test "patch replaces the upstream text once and refuses a text that is not there" {
+  let before = "x\n    while (frame_ip < frame_ip_end) {\n        opcode = *frame_ip++;\ny"
+  let after = patch("iwasm/interpreter/wasm_interp_fast.c", before)
+  assert_true(
+    after.contains("CHECK_INSTRUCTION_LIMIT();\n        opcode = *frame_ip++;"),
+  )
+  assert_eq(patch("shared/utils/bh_log.c", before), before)
+  assert_true(
+    try patch("iwasm/interpreter/wasm_interp_fast.c", "no loop") catch {
+      VendorError(_) => true
+    } noraise {
+      _ => false
+    },
+  )
+}
+
+///|
 /// The file name of the translation unit of a source: `wamr_` and the source name, with the platform
 /// for the platform start-up files, which share a name.
 fn unit_name(source : String, condition : Condition) -> String {
@@ -391,7 +441,7 @@ async fn vendor(checkout : String) -> Unit {
     manifest.write_string("| `core/\{file}` | `\{digest}` |\n")
     let out = "\{target}/\{file}"
     make_dirs(directory(out))
-    @fs.write_file(out, rewrite(file, data.text(), exists))
+    @fs.write_file(out, patch(file, rewrite(file, data.text(), exists)))
   }
   @fs.write_file(
     "\{destination}/LICENSE",
@@ -427,7 +477,9 @@ async fn vendor(checkout : String) -> Unit {
       $|builds with no include path. `extism_config.h` holds the build settings.
       $|
     ) +
-    "- Tag: `\{wamr_tag}`\n- Commit: `\{wamr_commit}`\n\n## Translation units\n\n" +
+    "- Tag: `\{wamr_tag}`\n- Commit: `\{wamr_commit}`\n\n## Patches\n\n" +
+    patches.map(p => "- `core/\{p.0}`: \{p.1}").join("\n") +
+    "\n\n## Translation units\n\n" +
     stubs.map(stub => "- `\{stub}`").join("\n") +
     "\n\n## Files and the SHA-256 of each upstream file\n\n| File | SHA-256 |\n| --- | --- |\n" +
     manifest.to_string(),
