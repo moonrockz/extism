@@ -17,6 +17,19 @@ pub fn GuestMemoryError::not_equal(Self, Self) -> Bool
 pub fn GuestMemoryError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+pub(all) enum Answer {
+  NoEntries
+  EndOfFile
+  Sinks
+  Sources
+  StreamStatus
+  Ends
+  NotCapable
+} derive(Eq, @debug.Debug)
+pub fn Answer::equal(Self, Self) -> Bool
+pub fn Answer::not_equal(Self, Self) -> Bool
+pub fn Answer::to_repr(Self) -> @debug.Repr
+
 pub(all) struct Clock {
   time : (ClockId) -> UInt64
   resolution : (ClockId) -> UInt64
@@ -93,6 +106,7 @@ pub(all) enum Function {
   SockShutdown
 } derive(Eq, @debug.Debug)
 pub fn Function::all() -> Array[Self]
+pub fn Function::answer(Self) -> Answer
 pub fn Function::equal(Self, Self) -> Bool
 pub fn Function::from_name(StringView) -> Self?
 pub fn Function::name(Self) -> String

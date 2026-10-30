@@ -4,9 +4,8 @@ An [Extism](https://extism.org) host for MoonBit. A MoonBit program on native, N
 loads an Extism plugin, calls its exports and gets the results, with limits on memory and time.
 
 > [!NOTE]
-> The repository is new. The packages are empty, and no version is published yet. The first OpenSpec
-> change, [`host-extism-plugins`](openspec/changes/host-extism-plugins/), gives the requirements and
-> the design.
+> No version is published yet. The OpenSpec change
+> [`host-extism-plugins`](openspec/changes/host-extism-plugins/) gives the requirements and the design.
 
 ## Packages
 

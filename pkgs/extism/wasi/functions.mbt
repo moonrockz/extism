@@ -245,3 +245,43 @@ pub fn Function::results(self : Function) -> Array[WasiType] {
     _ => [I32]
   }
 }
+
+///|
+/// The answer of the sandbox to a function, as `README.mbt.md` documents it. A function with an fd
+/// argument other than 0, 1 and 2 returns `EBADF` first.
+pub(all) enum Answer {
+  /// Zero entries and success.
+  NoEntries
+  /// fd 0 reads 0 bytes (end of file).
+  EndOfFile
+  /// fd 1 and fd 2 go to the embedder's sinks.
+  Sinks
+  /// The embedder's clock or random source; `ENOTCAPABLE` without one.
+  Sources
+  /// A character device for fds 0, 1 and 2.
+  StreamStatus
+  /// The call ends with the exit code.
+  Ends
+  /// `ENOTCAPABLE`.
+  NotCapable
+} derive(Eq, Debug)
+
+///|
+pub extend Answer with Eq::{equal, not_equal}
+
+///|
+pub extend Answer with @debug.Debug::{to_repr}
+
+///|
+/// The answer of the sandbox to the function.
+pub fn Function::answer(self : Function) -> Answer {
+  match self {
+    ArgsGet | ArgsSizesGet | EnvironGet | EnvironSizesGet => NoEntries
+    FdRead => EndOfFile
+    FdWrite => Sinks
+    ClockResGet | ClockTimeGet | RandomGet => Sources
+    FdFdstatGet | FdFilestatGet => StreamStatus
+    ProcExit => Ends
+    _ => NotCapable
+  }
+}

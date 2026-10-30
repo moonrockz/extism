@@ -1,7 +1,8 @@
 # moonrockz/extism
 
-An [Extism](https://extism.org) host for MoonBit. The packages are empty: the OpenSpec change
-`host-extism-plugins` in the repository gives their requirements and design.
+An [Extism](https://extism.org) host for MoonBit. The OpenSpec change `host-extism-plugins` in the
+repository gives the requirements and the design. `README.mbt.md` documents the plugin API, and each package
+has its own README.
 
 | Package | Gives | Targets |
 | --- | --- | --- |
