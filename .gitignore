@@ -1,0 +1,67 @@
+# Build System Artifacts
+
+# MoonBit default build output directory.
+_build/
+# Local MoonBit package cache directory.
+.mooncakes/
+
+# Coverage and Test Artifacts
+
+moonbit-coverage-*.txt
+_coverage/
+bisect.coverage
+
+# JavaScript Target Artifacts
+
+*.js.map
+node_modules/
+
+# WebAssembly Target Artifacts
+
+# Compiled WebAssembly binaries. The embedded Extism kernel is a generated .mbt file, not a .wasm file.
+*.wasm
+*.wat
+
+# Zig build output and cache.
+.zig-cache/
+zig-out/
+
+# LLVM Backend Artifacts
+
+*.ll
+*.bc
+*.o
+*.s
+*.out
+*.exe
+*.dSYM/
+
+# Mise
+
+# Local mise overrides (copy .config/mise/config.local.toml.example).
+.config/mise/config.local.toml
+mise.local.toml
+.mise.local.toml
+
+# Lefthook
+
+lefthook-local.yml
+
+# Misc
+
+.DS_Store
+*.log
+
+# AI working documents (specs, plans, scratch)
+
+.dev/
+docs/superpowers/
+
+# Docs site output (mise run build:site)
+
+_site/
+
+# Beads: work is tracked in the shared Morphir tracker, never in a database of this repository.
+.beads/
+.dolt/
+*.db

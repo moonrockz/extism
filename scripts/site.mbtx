@@ -1,0 +1,87 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Build, check or serve the docs site with the site driver in `apps/site/cmd`. The configuration is
+/// `site/site.json` and the output is `_site/`.
+///
+/// Usage: `mise run build:site`, `mise run check:site` and `mise run dev:site [-- --port <n>]`, or
+/// `moonx scripts/toolchain.mbtx scripts/site.mbtx build|check|serve [options]`. Options go to the
+/// driver unchanged, for example `--json`. `serve` builds the site first. Run it from the repository
+/// root. The exit status is the status of the driver, or 2 for a usage error.
+
+///|
+enum Step {
+  Build
+  Check
+  Serve
+} derive(Eq, Debug)
+
+///|
+fn Step::parse(name : String) -> Step? {
+  match name {
+    "build" => Some(Build)
+    "check" => Some(Check)
+    "serve" => Some(Serve)
+    _ => None
+  }
+}
+
+///|
+/// The driver commands of a step, each with the options for it. `serve` builds first.
+fn Step::commands(self : Step, options : Array[String]) -> Array[Array[String]] {
+  match self {
+    Build => [["build", ..options]]
+    Check => [["check", ..options]]
+    Serve => [["build"], ["serve", ..options]]
+  }
+}
+
+///|
+/// The `moon` arguments that run the site driver with `command`.
+fn driver_arguments(command : Array[String]) -> Array[String] {
+  ["run", "--target", "native", "apps/site/cmd", "--", ..command]
+}
+
+///|
+async fn main {
+  let args = @env.args()[1:].to_owned()
+  guard args is [name, .. options] && Step::parse(name) is Some(step) else {
+    eprintln("Usage: site.mbtx build|check|serve [options]")
+    @sys.exit(2)
+    return
+  }
+  for command in step.commands(options.to_owned()) {
+    let code = @process.run(
+      "moon",
+      driver_arguments(command),
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    if code != 0 {
+      @sys.exit(if code > 0 { code } else { 1 })
+    }
+  }
+}
+
+///|
+test "each step runs the driver command with its options" {
+  assert_eq(Step::parse("build"), Some(Build))
+  assert_eq(Step::parse("deploy"), None)
+  assert_eq(Build.commands(["--json"]), [["build", "--json"]])
+  assert_eq(Check.commands([]), [["check"]])
+  assert_eq(Serve.commands(["--port", "8080"]), [
+    ["build"],
+    ["serve", "--port", "8080"],
+  ])
+  assert_eq(driver_arguments(["check", "--json"]), [
+    "run", "--target", "native", "apps/site/cmd", "--", "check", "--json",
+  ])
+}

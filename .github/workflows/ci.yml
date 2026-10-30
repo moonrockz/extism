@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  MISE_EXPERIMENTAL: 'true'
+  # The mise release that installs the pinned tools. The setup action reads it on every runner.
+  MISE_VERSION: v2026.10.20
+
+jobs:
+  lint:
+    name: Lint and validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install pinned tools
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Lint
+        run: mise run lint
+      - name: Validate workspace
+        run: mise run validate
+      - name: Validate OpenSpec
+        run: mise run openspec:validate
+
+  # One job for each target tests it and then builds it in release mode.
+  test:
+    name: Test and build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: [lint]
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wasm, wasm-gc, js, native]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install pinned tools
+        id: setup
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test
+        run: mise run test -- ${{ matrix.target }}
+      # The release build also runs when a test fails, so one run shows both results.
+      - name: Build in release mode
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: mise run build -- ${{ matrix.target }} --release
+
+  test-scripts:
+    name: Test task scripts
+    runs-on: ubuntu-latest
+    needs: [lint]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install pinned tools
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test task scripts
+        run: mise run test:scripts
+
+  # The docs site. It runs on each pull request with no path filter, because a path-filtered
+  # required check stays pending on other pull requests. It builds and checks the site and does not
+  # deploy it.
+  site:
+    name: Site
+    runs-on: ubuntu-latest
+    needs: [lint]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install pinned tools
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build the site
+        run: mise run build:site -- --json
+      - name: Check the site
+        run: mise run check:site -- --json
+
+  # A single required check for branch protection.
+  ci-ok:
+    name: ci-ok
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [lint, test, test-scripts, site]
+    steps:
+      - name: Require every job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[]
+            | select(.value.result != "success")
+            | "\(.key): \(.value.result)"' <<<"$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::Required CI jobs did not succeed"
+            echo "$failed"
+            exit 1
+          fi

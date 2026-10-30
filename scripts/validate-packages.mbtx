@@ -1,0 +1,289 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Check the package structure and the versions of the workspace.
+///
+/// - `moon.work` exists, and each member has `moon.mod`. A member other than `.` has `moon.pkg` in its
+///   root or in a sub-directory.
+/// - Each directory under `pkgs/` and `apps/` that has `moon.mod` is a member.
+/// - Each member has the `version` of the root `moon.mod`, which is the version source of truth.
+/// - The root and each module under `apps/` set `private = true`. A library under `pkgs/` does not.
+///
+/// A member is an entry of `moon.work` that starts, after whitespace, with a quoted path. A line
+/// comment does not count.
+///
+/// Usage: `mise run validate`, or `moonx scripts/toolchain.mbtx scripts/validate-packages.mbtx`.
+/// It exits with 0 when the workspace is valid, else with 1 and one line for each problem.
+
+///|
+/// The directories whose child directories hold workspace modules.
+let member_roots : Array[String] = ["pkgs", "apps"]
+
+///|
+/// The kind of a workspace module, from its location.
+enum ModuleKind {
+  /// The workspace root, which holds the shared version.
+  Root
+  /// A library under `pkgs/`, which a release can publish.
+  Library
+  /// A tool under `apps/`, which is never published.
+  Tooling
+}
+
+///|
+fn ModuleKind::of(path : String) -> ModuleKind {
+  if path == "." {
+    Root
+  } else if path.has_prefix("pkgs/") {
+    Library
+  } else {
+    Tooling
+  }
+}
+
+///|
+/// The members of `moon.work`, without a leading `./`.
+fn members(work : String) -> Array[String] {
+  let found = []
+  for line in work.split("\n") {
+    let entry = line.trim_start(chars=" \t\r")
+    guard entry is ['"', .. rest] else { continue }
+    guard rest.find("\"") is Some(end) else { continue }
+    let path = rest[:end].to_owned()
+    let path = if path.has_prefix("./") { path[2:].to_owned() } else { path }
+    if path != "" {
+      found.push(path)
+    }
+  }
+  found
+}
+
+///|
+/// The quoted value of the top-level `key = "value"` line of a `moon.mod` file.
+fn field(manifest : String, key : String) -> String? {
+  for line in manifest.split("\n") {
+    let line = line.trim(chars=" \t\r")
+    guard line.has_prefix(key) else { continue }
+    let rest = line[key.length():].trim_start(chars=" \t")
+    guard rest is ['=', .. value] else { continue }
+    let value = value.trim(chars=" \t")
+    guard value is ['"', .. quoted] && quoted.find("\"") is Some(end) else {
+      return Some(value.to_owned())
+    }
+    return Some(quoted[:end].to_owned())
+  }
+  None
+}
+
+///|
+/// Whether any directory at or below `dir` holds `moon.pkg`.
+async fn has_package(dir : String) -> Bool {
+  if @fs.exists("\{dir}/moon.pkg") {
+    return true
+  }
+  for entry in @fs.readdir(dir, sort=true) {
+    let child = "\{dir}/\{entry}"
+    guard entry != "_build" && entry != ".mooncakes" else { continue }
+    guard @fs.kind(child) is Directory else { continue }
+    if has_package(child) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// The problems of the workspace at `root`, in a stable order. An empty array means that it is valid.
+async fn validate(root : String) -> Array[String] {
+  let problems = []
+  guard @fs.exists("\{root}/moon.work") else {
+    return ["moon.work: workspace manifest is missing"]
+  }
+  let listed = members(@fs.read_file("\{root}/moon.work").text())
+  if listed.is_empty() {
+    problems.push("moon.work: lists no members")
+  }
+  let root_version = if @fs.exists("\{root}/moon.mod") {
+    field(@fs.read_file("\{root}/moon.mod").text(), "version")
+  } else {
+    None
+  }
+  if root_version is None {
+    problems.push("moon.mod: the root module has no version")
+  }
+  for path in listed {
+    let dir = if path == "." { root } else { "\{root}/\{path}" }
+    guard @fs.exists("\{dir}/moon.mod") else {
+      problems.push("\{path}: member of moon.work has no moon.mod")
+      continue
+    }
+    if path != "." && !has_package(dir) {
+      problems.push("\{path}: member of moon.work has no moon.pkg")
+    }
+    let manifest = @fs.read_file("\{dir}/moon.mod").text()
+    let version = field(manifest, "version")
+    if root_version is Some(expected) && version != Some(expected) {
+      let actual = version.unwrap_or("(none)")
+      problems.push(
+        "\{path}: version \{actual} differs from the root version \{expected}",
+      )
+    }
+    let private = field(manifest, "private") == Some("true")
+    match ModuleKind::of(path) {
+      Root | Tooling if !private =>
+        problems.push("\{path}: tooling module must set private = true")
+      Library if private =>
+        problems.push("\{path}: library module must not be private")
+      _ => ()
+    }
+  }
+  for parent in member_roots {
+    guard @fs.exists("\{root}/\{parent}") else { continue }
+    for entry in @fs.readdir("\{root}/\{parent}", sort=true) {
+      let path = "\{parent}/\{entry}"
+      if @fs.exists("\{root}/\{path}/moon.mod") && !listed.contains(path) {
+        problems.push("\{path}: module is not a member of moon.work")
+      }
+    }
+  }
+  problems
+}
+
+///|
+test "members skips comments and the ./ prefix" {
+  assert_eq(
+    members(
+      "members = [\n  \".\",\n  // \"./old\",\n  \"./pkgs/a\",\n  \"apps/b\",\n]\n",
+    ),
+    [".", "pkgs/a", "apps/b"],
+  )
+}
+
+///|
+test "field reads quoted and bare values" {
+  let manifest = "name = \"x/y\"\nprivate = true\nversion = \"1.2.3\"\n"
+  assert_eq(field(manifest, "version"), Some("1.2.3"))
+  assert_eq(field(manifest, "private"), Some("true"))
+  assert_eq(field(manifest, "readme"), None)
+}
+
+///|
+async fn main {
+  let problems = validate(".")
+  for problem in problems {
+    println("❌ \{problem}")
+  }
+  if !problems.is_empty() {
+    @sys.exit(1)
+  }
+  println("✅ Workspace structure and versions are valid")
+}
+
+///|
+/// Writes a workspace fixture: `files` maps a path below the root to its content.
+async fn fixture(files : Array[(String, String)]) -> String {
+  let dir = @fs.tmpdir(prefix="extism-validate")
+  for file in files {
+    let (path, content) = file
+    let parent = match path.rev_find("/") {
+      Some(end) => "\{dir}/\{path[:end]}"
+      None => dir
+    }
+    if !@fs.exists(parent) {
+      @fs.mkdir(parent, recursive=true)
+    }
+    @fs.write_file("\{dir}/\{path}", content)
+  }
+  dir
+}
+
+///|
+let valid_files : Array[(String, String)] = [
+  ("moon.mod", "name = \"x/workspace\"\nprivate = true\nversion = \"0.2.0\"\n"),
+  (
+    "moon.work", "members = [\n  \".\",\n  \"./pkgs/lib\",\n  \"./apps/tool\",\n]\n",
+  ),
+  ("pkgs/lib/moon.mod", "name = \"x/lib\"\nversion = \"0.2.0\"\n"),
+  ("pkgs/lib/moon.pkg", ""),
+  (
+    "apps/tool/moon.mod", "name = \"x/tool\"\nprivate = true\nversion = \"0.2.0\"\n",
+  ),
+  ("apps/tool/cmd/moon.pkg", ""),
+]
+
+///|
+async fn problems_with(changes : Array[(String, String)]) -> Array[String] {
+  let files = valid_files.filter(file => {
+    !changes.iter().any(change => change.0 == file.0)
+  })
+  let dir = fixture(files + changes.filter(change => change.1 != "<removed>"))
+  defer @fs.rmdir(dir, recursive=true)
+  validate(dir)
+}
+
+///|
+async test "a valid workspace has no problems" {
+  assert_eq(problems_with([]), [])
+}
+
+///|
+async test "a member without moon.mod or without a package is a problem" {
+  assert_eq(problems_with([("pkgs/lib/moon.mod", "<removed>")]), [
+    "pkgs/lib: member of moon.work has no moon.mod",
+  ])
+  assert_eq(problems_with([("apps/tool/cmd/moon.pkg", "<removed>")]), [
+    "apps/tool: member of moon.work has no moon.pkg",
+  ])
+}
+
+///|
+async test "a module under pkgs or apps that moon.work does not list is a problem" {
+  assert_eq(
+    problems_with([
+      ("pkgs/other/moon.mod", "name = \"x/other\"\nversion = \"0.2.0\"\n"),
+      ("pkgs/other/moon.pkg", ""),
+    ]),
+    ["pkgs/other: module is not a member of moon.work"],
+  )
+}
+
+///|
+async test "every member has the version of the root moon.mod" {
+  assert_eq(
+    problems_with([
+      ("pkgs/lib/moon.mod", "name = \"x/lib\"\nversion = \"0.3.0\"\n"),
+    ]),
+    ["pkgs/lib: version 0.3.0 differs from the root version 0.2.0"],
+  )
+}
+
+///|
+async test "tooling is private and libraries are public" {
+  assert_eq(
+    problems_with([
+      ("apps/tool/moon.mod", "name = \"x/tool\"\nversion = \"0.2.0\"\n"),
+    ]),
+    ["apps/tool: tooling module must set private = true"],
+  )
+  assert_eq(
+    problems_with([
+      (
+        "pkgs/lib/moon.mod", "name = \"x/lib\"\nprivate = true\nversion = \"0.2.0\"\n",
+      ),
+    ]),
+    ["pkgs/lib: library module must not be private"],
+  )
+}
+
+///|
+async test "a missing moon.work is a problem" {
+  assert_eq(problems_with([("moon.work", "<removed>")]), [
+    "moon.work: workspace manifest is missing",
+  ])
+}

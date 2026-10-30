@@ -1,0 +1,174 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Validate the OpenSpec files, or regenerate the OpenSpec agent skills.
+///
+/// - `validate` checks that `openspec/config.yaml` selects the `html-design` schema, validates the
+///   schema, and validates every change and spec in strict mode.
+/// - `setup` runs `openspec init` for the agent tools of this repository with the `core` profile.
+///   It gives OpenSpec a temporary global configuration, so personal preferences do not change the
+///   generated skills, and removes it after the run.
+///
+/// Usage: `mise run openspec:validate` and `mise run openspec:setup`, or
+/// `moonx scripts/toolchain.mbtx scripts/openspec.mbtx validate|setup`. The exit status is 0 for
+/// success, 1 for a failure and 2 for a usage error.
+
+///|
+enum Operation {
+  Validate
+  Setup
+} derive(Eq, Debug)
+
+///|
+fn Operation::parse(args : ArrayView[String]) -> Operation? {
+  match args {
+    [] | ["validate"] => Some(Validate)
+    ["setup"] => Some(Setup)
+    _ => None
+  }
+}
+
+///|
+/// The OpenSpec version that `setup` requires, the pin in `.config/mise/config.toml`.
+let openspec_version : String = "1.14.3"
+
+///|
+/// The agent tools whose OpenSpec skills `setup` generates.
+let agent_tools : String = "agents,claude,codex,cursor,github-copilot"
+
+///|
+/// The global OpenSpec preferences that `setup` uses in place of the personal ones.
+fn setup_preferences() -> Json {
+  {
+    "profile": "core",
+    "delivery": "skills",
+    "telemetry": { "noticeSeen": true },
+  }
+}
+
+///|
+/// Whether `openspec/config.yaml` selects the `html-design` schema with a top-level `schema:` line.
+fn selects_html_design(config : String) -> Bool {
+  config
+  .split("\n")
+  .any(line => line.trim_end(chars=" \t\r") == "schema: html-design")
+}
+
+///|
+async fn run(
+  command : String,
+  args : Array[String],
+  extra_env~ : Map[String, String] = {},
+) -> Unit {
+  let code = @process.run(
+    command,
+    args,
+    extra_env~,
+    stdout=@stdio.stdout,
+    stderr=@stdio.stderr,
+  )
+  guard code == 0 else {
+    fail("`\{command} \{args.join(" ")}` exited with \{code}")
+  }
+}
+
+///|
+/// Runs `run_init` with a temporary global configuration directory and removes the directory after it.
+async fn setup_with(
+  run_init : async (String, Map[String, String]) -> Unit,
+) -> Unit {
+  let home = @fs.tmpdir(prefix="extism-openspec")
+  defer @fs.rmdir(home, recursive=true)
+  @fs.mkdir("\{home}/openspec")
+  @fs.write_file(
+    "\{home}/openspec/config.json",
+    setup_preferences().stringify(),
+  )
+  run_init(home, { "XDG_CONFIG_HOME": home, "OPENSPEC_TELEMETRY": "0" })
+}
+
+///|
+async fn main {
+  guard Operation::parse(@env.args()[1:]) is Some(operation) else {
+    eprintln("Usage: openspec.mbtx [validate|setup]")
+    @sys.exit(2)
+    return
+  }
+  try {
+    match operation {
+      Validate => {
+        guard selects_html_design(@fs.read_file("openspec/config.yaml").text()) else {
+          fail("openspec/config.yaml must select `schema: html-design`")
+        }
+        run("openspec", ["schema", "validate", "html-design"])
+        run("openspec", ["validate", "--all", "--strict", "--no-interactive"])
+        println("✅ OpenSpec is valid")
+      }
+      Setup => {
+        let (code, version, _) = @process.collect_output("openspec", [
+          "--version",
+        ])
+        guard code == 0 && version.text().trim() == openspec_version else {
+          fail("setup needs OpenSpec \{openspec_version}; run mise install")
+        }
+        setup_with(async fn(_, environment) {
+          run(
+            "openspec",
+            [
+              "init", "--tools", agent_tools, "--profile", "core", "--no-animation",
+            ],
+            extra_env=environment,
+          )
+        })
+        println("✅ OpenSpec skills regenerated")
+      }
+    }
+  } catch {
+    error => {
+      eprintln("openspec: \{error}")
+      @sys.exit(1)
+    }
+  }
+}
+
+///|
+test "operations parse from the arguments" {
+  assert_eq(Operation::parse([]), Some(Validate))
+  assert_eq(Operation::parse(["validate"]), Some(Validate))
+  assert_eq(Operation::parse(["setup"]), Some(Setup))
+  assert_eq(Operation::parse(["setup", "extra"]), None)
+  assert_eq(Operation::parse(["archive"]), None)
+}
+
+///|
+test "the config must select html-design at the top level" {
+  assert_true(selects_html_design("schema: html-design\ncontext: |\n  x\n"))
+  assert_false(selects_html_design("schema: spec-driven\n"))
+  assert_false(selects_html_design("  schema: html-design\n"))
+}
+
+///|
+async test "setup isolates its configuration and removes it after the run" {
+  let mut seen : String? = None
+  setup_with(async fn(home, environment) {
+    seen = Some(home)
+    let preferences = @json.parse(
+      @fs.read_file("\{home}/openspec/config.json").text(),
+    )
+    assert_eq(environment.get("XDG_CONFIG_HOME"), Some(home))
+    assert_eq(environment.get("OPENSPEC_TELEMETRY"), Some("0"))
+    assert_eq(preferences, setup_preferences())
+  })
+  guard seen is Some(home) else { fail("setup did not run the callback") }
+  assert_false(@fs.exists(home))
+}

@@ -1,0 +1,128 @@
+# Mise configuration for the moonrockz/extism monorepo.
+#
+# Tools are pinned here. Tasks are MoonBit scripts in scripts/*.mbtx, run with moonx, so one script
+# works on every platform (see AGENTS.md).
+#
+# Local overrides go in .config/mise/config.local.toml (gitignored); see config.local.toml.example.
+
+[tools]
+# Node.js runs the js target in `moon test --target js`, and OpenSpec. Same pin as finos/morphir-moonbit.
+node = "24.22.1"
+
+# Zig compiles the Extism kernel to wasm32-freestanding and builds the WAMR engine from C source.
+# Same pin as finos/morphir-moonbit, which consumes this repository's package.
+zig = "0.17.0"
+
+# YAML linting, pinned so lint results do not change between machines
+yamllint = "1.38.0"
+
+# GitHub Actions workflow linting
+actionlint = "1.7.12"
+
+# Git hooks manager; the hooks are in lefthook.yml
+lefthook = "2.1.1"
+
+# Spec-driven change proposals under openspec/; needs Node.js 20.19 or later
+"npm:@fission-ai/openspec" = "1.14.3"
+
+# MoonBit toolchain, pinned to the version of finos/morphir-moonbit. mise cannot resolve "latest"
+# for an http: tool, and a pinned version keeps CI and every machine on the same compiler. To move to
+# a newer release, change the version here and in each URL (with "+" written as "%2B"), taken from
+# https://cli.moonbitlang.com/binaries/<version>/.
+#
+# The binary archive omits the core library and moonx. CI (and a fresh machine) completes it with
+# `curl -fsSL https://cli.moonbitlang.com/install/unix.sh | MOON_HOME=$(mise where http:moonbit) bash -s -- <version>`.
+
+[tools."http:moonbit"]
+version = "0.10.17+d971670cd"
+bin_path = "bin"
+
+[tools."http:moonbit".platforms]
+linux-x64 = { url = "https://cli.moonbitlang.com/binaries/0.10.17%2Bd971670cd/moonbit-linux-x86_64.tar.gz" }
+linux-arm64 = { url = "https://cli.moonbitlang.com/binaries/0.10.17%2Bd971670cd/moonbit-linux-aarch64.tar.gz" }
+macos-arm64 = { url = "https://cli.moonbitlang.com/binaries/0.10.17%2Bd971670cd/moonbit-darwin-aarch64.tar.gz" }
+windows-x64 = { url = "https://cli.moonbitlang.com/binaries/0.10.17%2Bd971670cd/moonbit-windows-x86_64.zip", format = "zip" }
+# No Windows arm64 build is published; Windows on Arm runs the x64 build under emulation.
+windows-arm64 = { url = "https://cli.moonbitlang.com/binaries/0.10.17%2Bd971670cd/moonbit-windows-x86_64.zip", format = "zip" }
+
+[settings]
+experimental = true
+
+# Every task runs through toolchain.mbtx to keep nested moon/moonc/moonx calls on the mise pin,
+# even when the calling shell puts a global toolchain first on PATH. Pass arguments after `--`.
+
+[tasks.build]
+description = "Build all workspace members (args: targets, --release; default: wasm wasm-gc js native)"
+run = "moonx scripts/toolchain.mbtx scripts/build.mbtx"
+
+[tasks."build:native"]
+description = "Build all workspace members for native in release mode"
+run = "moonx scripts/toolchain.mbtx scripts/build.mbtx native --release"
+
+[tasks."build:js"]
+description = "Build all workspace members for the js target"
+run = "moonx scripts/toolchain.mbtx scripts/build.mbtx js"
+
+[tasks.test]
+description = "Run tests for all workspace members (args: targets; default: wasm wasm-gc js native)"
+run = "moonx scripts/toolchain.mbtx scripts/test.mbtx"
+
+[tasks."test:scripts"]
+description = "Test the task scripts (args: script file names)"
+run = "moonx scripts/toolchain.mbtx scripts/test-scripts.mbtx"
+
+[tasks.format]
+description = "Format MoonBit code"
+run = "moonx scripts/toolchain.mbtx scripts/format.mbtx"
+
+[tasks.lint]
+description = "Run all lint tasks (YAML, GitHub Actions, MoonBit format and check)"
+run = "moonx scripts/toolchain.mbtx scripts/lint.mbtx"
+
+[tasks."lint:moonbit"]
+description = "Check MoonBit formatting, run moon check and check the generated interfaces (args: --staged)"
+run = "moonx scripts/toolchain.mbtx scripts/lint-moonbit.mbtx"
+
+[tasks."lint:yaml"]
+description = "Lint YAML files with yamllint and the workflows with actionlint"
+run = "moonx scripts/toolchain.mbtx scripts/lint-yaml.mbtx"
+
+[tasks.validate]
+description = "Verify the workspace package structure and versions against moon.work and the root moon.mod"
+run = "moonx scripts/toolchain.mbtx scripts/validate-packages.mbtx"
+
+[tasks."openspec:validate"]
+description = "Validate the html-design schema and every OpenSpec change and spec in strict mode"
+run = "moonx scripts/toolchain.mbtx scripts/openspec.mbtx validate"
+
+[tasks."openspec:setup"]
+description = "Regenerate the OpenSpec agent skills with isolated global preferences"
+run = "moonx scripts/toolchain.mbtx scripts/openspec.mbtx setup"
+
+[tasks."build:site"]
+description = "Build the docs site into _site/ (args: --base /)"
+run = "moonx scripts/toolchain.mbtx scripts/site.mbtx build"
+
+[tasks."check:site"]
+description = "Check the links and resources of the built docs site in _site/"
+run = "moonx scripts/toolchain.mbtx scripts/site.mbtx check"
+
+[tasks."dev:site"]
+description = "Build the docs site and serve it at http://127.0.0.1:4173/extism/ (args: --port <n>)"
+run = "moonx scripts/toolchain.mbtx scripts/site.mbtx serve"
+
+[tasks.check]
+description = "Run lint, validate, OpenSpec validation, tests, task script tests, builds and the site check"
+run = "moonx scripts/toolchain.mbtx scripts/check.mbtx"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "moonx scripts/toolchain.mbtx scripts/clean.mbtx"
+
+[tasks."hooks:install"]
+description = "Install git hooks with lefthook"
+run = "moonx scripts/toolchain.mbtx scripts/hooks-install.mbtx"
+
+[tasks.list-tasks]
+description = "List mise tasks"
+run = "mise tasks"

@@ -1,0 +1,4 @@
+// The WASM engine layer (`moonrockz/extism/engine`). It is empty until the host-extism-plugins change
+// implements it. Native uses WAMR built from C source with Zig, and js uses `WebAssembly`; a
+// wasm or wasm-gc host has no engine to embed, so the package supports native and js only.
+supported_targets = "+native+js"

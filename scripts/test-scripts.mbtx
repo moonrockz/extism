@@ -1,0 +1,97 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/x@0.5.6/sys",
+  "moonbitlang/core/env",
+}
+----
+
+///|
+/// Run the tests of the task scripts.
+///
+/// A script is tested when it declares tests. `moon test` of a package does not include `.mbtx`
+/// files, so this script is their only test runner. It uses the wasm backend, as `moonx` does for a
+/// standalone `.mbtx` file, and denies warnings. It stops at the first failure. Optional file name
+/// arguments select only those scripts.
+///
+/// Usage: `mise run test:scripts [-- <file>...]`, or `moonx scripts/toolchain.mbtx scripts/test-scripts.mbtx`.
+
+///|
+let scripts_dir : String = "scripts"
+
+///|
+/// Whether the source of a script declares a test.
+fn declares_tests(source : String) -> Bool {
+  source
+  .split("\n")
+  .any(line => {
+    let line = line.trim_start()
+    line.has_prefix("test \"") || line.has_prefix("async test \"")
+  })
+}
+
+///|
+test "a script declares tests with test or async test at the start of a line" {
+  assert_true(declares_tests("///|\ntest \"one\" {\n}\n"))
+  assert_true(declares_tests("///|\n  async test \"two\" {\n}\n"))
+  assert_false(
+    declares_tests("///|\nfn main {\n  println(\"test \\\"x\\\"\")\n}\n"),
+  )
+}
+
+///|
+/// The environment without the `GIT_` variables. A git hook sets `GIT_DIR`, `GIT_INDEX_FILE` and
+/// others for its child processes. A script test that makes a fixture repository and runs `git` in
+/// it would otherwise change the repository that runs the hook.
+fn without_git_variables(
+  environment : Map[String, String],
+) -> Map[String, String] {
+  Map::from_iter(
+    environment.iter().filter(entry => !entry.0.has_prefix("GIT_")),
+  )
+}
+
+///|
+test "the script tests get no GIT_ variable of a calling git hook" {
+  let environment = without_git_variables({
+    "PATH": "/bin",
+    "GIT_DIR": "/repo/.git",
+    "GIT_INDEX_FILE": "/repo/.git/index",
+    "HOME": "/home/user",
+  })
+  assert_eq(environment, { "PATH": "/bin", "HOME": "/home/user" })
+}
+
+///|
+async fn main {
+  let selected = @env.args()[1:].to_owned()
+  let files = if selected.is_empty() {
+    @fs.readdir(scripts_dir, sort=true)
+  } else {
+    selected
+  }
+  let mut tested = 0
+  for file in files {
+    guard file.has_suffix(".mbtx") else { continue }
+    let path = "\{scripts_dir}/\{file}"
+    guard declares_tests(@fs.read_file(path).text()) else { continue }
+    println("🧪 Testing \{path}")
+    let code = @process.run(
+      "moon",
+      ["test", "--deny-warn", "--target", "wasm", path],
+      extra_env=without_git_variables(@env.get_env_vars()),
+      inherit_env=false,
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    if code != 0 {
+      eprintln("❌ The tests of \{path} failed.")
+      @sys.exit(if code > 0 { code } else { 1 })
+    }
+    tested += 1
+  }
+  println("✅ Tested \{tested} scripts")
+}

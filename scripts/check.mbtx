@@ -1,0 +1,39 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Run the full local gate: lint, validate, OpenSpec validation, tests, task script tests, builds and
+/// the docs site.
+///
+/// Usage: `mise run check`, or `moonx scripts/toolchain.mbtx scripts/check.mbtx`.
+
+///|
+async fn main {
+  println("🔍 Running all checks...")
+  for
+    task in [
+      "lint", "validate", "openspec:validate", "test", "test:scripts", "build", "build:site",
+      "check:site",
+    ] {
+    println("")
+    println("=== \{task} ===")
+    let code = @process.run(
+      "mise",
+      ["run", task],
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    if code != 0 {
+      println("❌ \{task} failed")
+      @sys.exit(if code > 0 { code } else { 1 })
+    }
+  }
+  println("")
+  println("✅ All checks passed!")
+}

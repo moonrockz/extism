@@ -1,0 +1,14 @@
+import {
+  "moonrockz/telescope/host",
+  "moonrockz/telescope/model",
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/x/sys",
+}
+
+// The telescope host does native file and socket I/O only.
+supported_targets = "native"
+
+pkgtype(kind: "executable")

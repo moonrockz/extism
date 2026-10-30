@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>host-extism-plugins: design</title>
+<!--
+  Agent document template (docs/templates/agent-document.html). Specs, plans and reports that a person reviews
+  start from this file: copy it, keep the <head> as it is, and write the content inside <main>.
+  Styles and scripts are files in docs/templates/assets/, referenced and not embedded. In a copy, change the
+  "assets/" prefix of each href and src to the relative path from the copy to that directory, for example
+  "../../docs/templates/assets/" from .dev/beads-specs/. See AGENTS.md, "Specs and plans are HTML documents".
+  Code goes in <pre><code class="language-moonbit"> (or scheme, toml, json, bash, diff). Give sections an id and
+  list them in nav.toc.
+-->
+<link rel="stylesheet" href="../../../docs/templates/assets/agent-document.css">
+<link rel="stylesheet" href="../../../docs/templates/assets/highlight/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="../../../docs/templates/assets/highlight/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="../../../docs/templates/assets/highlight/highlight.min.js"></script>
+<script defer src="../../../docs/templates/assets/highlight/languages/scheme.min.js"></script>
+<script defer src="../../../docs/templates/assets/agent-document.js"></script>
+</head>
+<body>
+<main>
+<h1>host-extism-plugins: design</h1>
+<p class="meta">OpenSpec change · Bead <code>morphir-ukvn.5.64.36.4</code> · 2026-10-30 · proposed</p>
+
+<nav class="toc" aria-label="Contents">
+<ul>
+<li><a href="#context">Context</a></li>
+<li><a href="#goals">Goals and non-goals</a></li>
+<li><a href="#walkthrough">One call, from manifest to output</a></li>
+<li><a href="#architecture">Packages and layers</a></li>
+<li><a href="#decisions">Decisions</a></li>
+<li><a href="#risks">Risks and trade-offs</a></li>
+<li><a href="#migration">Migration plan</a></li>
+<li><a href="#open-questions">Open questions</a></li>
+</ul>
+</nav>
+
+<h2 id="context">Context</h2>
+<p>See proposal.md for the motivation. The repository has the canonical moonrockz setup and four empty packages.
+This design comes from the approved design of <code>host-extensions-as-workers</code> in finos/morphir-moonbit
+(decisions EXT-1, EXT-2, EXT-3, WASM-1, WASM-4 and the section "The moonrockz/extism repository"). Decisions that
+come from there are labelled <strong>Owner</strong>. Decisions that this design adds are labelled
+<strong>Call</strong>.</p>
+<p>Facts from the upstream sources that shape the design:</p>
+<ul>
+<li>Upstream Extism does not run its kernel as host code. The kernel is a <code>no_std</code> Rust crate compiled to
+WASM (<code>runtime/src/extism-runtime.wasm</code>, 3,474 bytes, 16 initial pages of memory). Its exports are
+<code>memory</code>, the 20 kernel functions, <code>__data_end</code>, <code>__heap_base</code> and the
+<code>extism_context</code> externref global, which <code>kernel/build.sh</code> merges in with
+<code>wasm-merge --enable-reference-types</code>. The Go, Java, Erlang and WAMR SDKs embed the same file.</li>
+<li>The JavaScript SDK (<code>src/call-context.ts</code>) has a second kernel written in JavaScript, so its
+allocation and limits differ from the other SDKs.</li>
+<li><code>extism/wamr-sdk</code> registers each kernel import as a WAMR native symbol in
+<code>extism:host/env</code>; each native function calls the kernel instance with
+<code>wasm_runtime_call_wasm_a</code>.</li>
+<li>Before the first call, upstream initializes the guest runtime: <code>hs_init</code> (after
+<code>_initialize</code>) for Haskell, else <code>__wasm_call_ctors</code>, else <code>_initialize</code>.</li>
+<li>WAMR <code>WAMR-2.4.5</code> has instruction metering in the fast and the classic interpreter
+(<code>WAMR_BUILD_INSTRUCTION_METERING</code>, <code>wasm_runtime_set_instruction_count_limit</code>), a maximum
+memory size per instantiation (<code>wasm_runtime_instantiation_args_set_max_memory_pages</code>) and
+<code>wasm_runtime_terminate</code>. Its CMake selects an assembly <code>invokeNative</code> per architecture,
+<code>.asm</code> (MASM) on Windows MSVC, or <code>invokeNative_general.c</code>. On x86_64 and aarch64,
+<code>invokeNative_general.c</code> reads the <code>uint64</code> register array as <code>uint32</code> cells, so
+a native with an <code>i64</code> parameter gets a wrong value. A native that is registered with
+<code>wasm_runtime_register_natives_raw</code> gets its arguments as an array of cells and needs no
+<code>invokeNative</code>.</li>
+<li>WAMR writes the resolved native of each import into the import entries of the compiled module, and its native
+registry is process-global. A native function finds its calling instance through the execution environment, and
+<code>wasm_runtime_get_custom_data</code> gives the data that the embedder put on that instance.</li>
+<li><code>wasm_runtime_terminate</code> sets a flag that the fast interpreter reads at its
+<code>CHECK_SUSPEND_FLAGS</code> points only when WAMR is built with <code>WASM_ENABLE_THREAD_MGR=1</code>.</li>
+<li>The upstream kernel: the root record is at offset 1 and is 64 bytes, so the first block is at offset 65. A
+block header is 12 bytes. With bounds checks, a load or store of <var>n</var> bytes at offset <var>p</var> runs
+when <var>p</var> + <var>n</var> − 1 ≥ 64 and <var>p</var> + <var>n</var> − 1 ≤ the memory size; the access traps
+when <var>p</var> + <var>n</var> is larger than the memory size. The Rust shadow stack is below 1 MiB
+(<code>__heap_base</code>), in the same pages as the root record.</li>
+</ul>
+
+<h2 id="goals">Goals and non-goals</h2>
+<p><strong>Goals:</strong> one kernel artifact for every engine; a plugin API that runs any conformant Extism
+plugin and gives the embedder the decision for every authority; a WASI sandbox written once; bounds that are
+reported as they are enforced; no prebuilt library and no Rust toolchain.</p>
+<p><strong>Non-goals:</strong> a full Extism SDK feature set in the first version (plugin download, manifest
+files, pooling, cancel handles shared across threads); process or thread isolation, which stays with the embedder;
+engine performance beyond the EXT-2 gate.</p>
+
+<h2 id="walkthrough">One call, from manifest to output</h2>
+<p>An embedder has the bytes of a plugin and wants to call its <code>handle</code> export with a JSON request.</p>
+<ol>
+<li>The embedder makes a <code>Manifest</code> with the bytes, the limits, the policy, its registered host
+functions and, if the plugin needs it, the WASI sandbox with a clock, a random source and two sinks.</li>
+<li><code>Plugin::load</code> reads the import section of the module. Each import must be one of the kernel
+functions, an Extism host function, a registered host function or, with the sandbox, a WASI preview 1 function.
+The first other import refuses the load and names it.</li>
+<li>The plugin API instantiates the embedded kernel bytes on the engine, with the kernel memory ceiling. Then it
+instantiates the plugin with the plugin memory ceiling and binds its imports: kernel imports to the kernel
+instance (<a href="#bnd-1">BND-1</a>), host functions to MoonBit closures that see a <code>CallContext</code>.</li>
+<li>Before the first call, the plugin API runs the guest runtime start-up (<code>_initialize</code> or the
+others).</li>
+<li><code>Plugin::call(self, "handle", input)</code> calls the kernel's <code>reset</code>, allocates the input in
+kernel memory, calls <code>input_set</code>, and calls <code>handle</code> with the instruction budget and the
+deadline.</li>
+<li>When <code>handle</code> returns 0 and no error is set, the plugin API reads <code>output_offset</code> and
+<code>output_length</code> and copies the output bytes out of kernel memory. An error is set, as upstream
+decides, when <code>error_get</code> gives a handle that is not 0 and the <code>length</code> of that handle is
+not 0. Otherwise the call fails with a typed error. A <code>proc_exit(0)</code> with no error set is a successful
+call that returns its output.</li>
+</ol>
+
+<h2 id="architecture">Packages and layers</h2>
+<svg role="img" aria-labelledby="layers-title layers-desc" viewBox="0 0 720 250" width="100%">
+<title id="layers-title">Packages of moonrockz/extism</title>
+<desc id="layers-desc">The embedder uses the plugin API. The plugin API uses the engine, the kernel and the WASI
+sandbox packages. The engine has a native WAMR backend and a js WebAssembly backend. The WASI sandbox and the
+plugin API use guest memory only through the engine's memory trait.</desc>
+<g font-family="sans-serif" font-size="14" fill="none" stroke="currentColor">
+<rect x="230" y="10" width="260" height="40" rx="6"/>
+<rect x="230" y="80" width="260" height="40" rx="6"/>
+<rect x="20" y="160" width="200" height="40" rx="6"/>
+<rect x="260" y="160" width="200" height="40" rx="6"/>
+<rect x="500" y="160" width="200" height="40" rx="6"/>
+<line x1="360" y1="50" x2="360" y2="80"/>
+<line x1="300" y1="120" x2="120" y2="160"/>
+<line x1="360" y1="120" x2="360" y2="160"/>
+<line x1="420" y1="120" x2="600" y2="160"/>
+</g>
+<g font-family="sans-serif" font-size="14" fill="currentColor" text-anchor="middle">
+<text x="360" y="35">Embedder (for example Morphir)</text>
+<text x="360" y="105">moonrockz/extism (plugin API)</text>
+<text x="120" y="185">kernel (Zig, bytes)</text>
+<text x="360" y="185">engine (WAMR | WebAssembly)</text>
+<text x="600" y="185">wasi (preview 1 sandbox)</text>
+<text x="360" y="235">kernel and wasi have no engine import; wasi works on a guest memory trait</text>
+</g>
+</svg>
+<table>
+<thead><tr><th>Path</th><th>Contents</th><th>Targets</th></tr></thead>
+<tbody>
+<tr><td><code>kernel/</code></td><td>Zig source of the kernel, its Zig tests and <code>build.zig</code>; not in the
+Mooncakes package</td><td>Zig</td></tr>
+<tr><td><code>pkgs/extism/kernel/</code></td><td>The generated <code>kernel_bytes.mbt</code> and its SHA-256, and
+the kernel ABI as MoonBit values (export names and signatures)</td><td>all</td></tr>
+<tr><td><code>pkgs/extism/wasi/</code></td><td>The preview 1 function table and the answer of each function, over
+a <code>GuestMemory</code> trait</td><td>all</td></tr>
+<tr><td><code>pkgs/extism/engine/</code></td><td>The engine API; <code>engine/wamr/</code> vendored WAMR C source
+and the C stub; the js backend through <code>extern "js"</code></td><td>native, js</td></tr>
+<tr><td><code>pkgs/extism/</code></td><td>Manifest, policy, registered host functions, <code>Plugin</code></td><td>native,
+js</td></tr>
+<tr><td><code>tests/</code></td><td>An unpublished module with fixture plugins, the differential kernel tests and
+the consumer checks</td><td>native, js</td></tr>
+</tbody>
+</table>
+
+<h2 id="decisions">Decisions</h2>
+
+<h3 id="pkg-1">PKG-1. One module, four packages; the sandbox does not import the engine (Call)</h3>
+<p>One published module, <code>moonrockz/extism</code>, holds the four packages, so that a consumer pins one
+version. The package names are the ones in the Morphir design. The kernel package holds only bytes and ABI
+values. The <code>wasi</code> package must build on all four targets, but the engine supports only native and
+js, so <code>wasi</code> defines a <code>GuestMemory</code> trait (read and write bytes, little-endian integers,
+size) and the engine implements it for an instance's memory. The plugin API joins them.</p>
+<p><em>Alternatives.</em> One package: a consumer that needs only the engine (the Morphir
+<code>morphir-bytes-v1</code> adapter) would get the plugin API too. <code>wasi</code> imports
+<code>engine</code>: then <code>wasi</code> is native and js only, against the approved target table.</p>
+
+<h3 id="krn-1">KRN-1. The kernel is Zig, compiled to wasm32-freestanding with an explicit CPU (Owner, details Call)</h3>
+<p>The kernel is about 300 lines of Zig with no libc and no allocator from the standard library. It follows the
+upstream memory layout exactly: the module declares 16 initial pages; the root record (initialized flag, bump
+position, tracked length, error, input and output offsets and lengths) is the 64 bytes at offset 1, so the first
+block header is at offset 65; a block header is 12 bytes (a status of unused, active or free, a size and a used
+length); a handle is the offset of a block's data. The arithmetic wraps, as the upstream release build does.</p>
+<p>It keeps the upstream bounds rule (the default <code>bounds-checking</code> feature of the Rust crate): a load
+or store of <var>n</var> bytes at offset <var>p</var> runs only when <var>p</var> + <var>n</var> − 1 ≥ 64 and
+<var>p</var> + <var>n</var> ≤ the memory size. Otherwise a load returns 0 and a store does nothing; neither traps.
+On every offset where upstream does not trap, the result is the upstream result. Where upstream traps because
+<var>p</var> + <var>n</var> is larger than the memory size (for example <code>load_u8</code> at the memory size),
+or because a block walk reads past the memory, the Zig kernel returns 0 or does nothing. The differential test of
+<a href="#krn-2">KRN-2</a> uses only sequences on which upstream does not trap.</p>
+<p>The kernel has no stack and no data in its linear memory: the module has no data segment, the build sets the
+stack size to 0, and no kernel function takes the address of a local or returns a value through memory (the block
+functions return offset 0 for no block, not an optional). So a plugin <code>store_*</code> can change only the
+root record bytes that upstream also exposes and the blocks; it cannot reach a stack or static data, because
+there is none. A test reads the kernel bytes and checks that there is no data section and that no function body
+reads or writes a global.</p>
+<pre><code class="language-bash">cd kernel &amp;&amp; zig build    # zig-out/bin/kernel.wasm
+# build.zig: wasm32-freestanding, cpu mvp+mutable_globals+sign_ext, ReleaseSmall, strip, no entry,
+# initial memory 16 pages, stack size 0, exports: memory and the 20 kernel functions only</code></pre>
+<p>The CPU is <code>mvp+mutable_globals+sign_ext</code>. The Zig default for wasm32 also enables reference types,
+bulk memory and other features; an explicit list makes sure that the kernel needs no feature that an engine
+might lack, and that a Zig upgrade does not change the feature set. <code>mise run build:kernel</code> writes
+<code>pkgs/extism/kernel/kernel_bytes.mbt</code> with the bytes and their SHA-256; <code>mise run check:kernel</code>
+builds into <code>_build/</code> and fails when the bytes differ. CI runs the check on Linux and macOS so that a
+host-dependent build shows.</p>
+<p><em>Alternatives.</em> Embed upstream <code>extism-runtime.wasm</code>: it needs reference types for its
+externref global, and its source is Rust, which needs a Rust toolchain to rebuild. A kernel in MoonBit: every
+byte that a plugin reads would cross into host code on every engine. Both were rejected in EXT-3.</p>
+
+<h3 id="krn-2">KRN-2. The kernel is tested against upstream, call for call (Call)</h3>
+<p>Zig tests check the allocator and the bounds checks. A differential test in <code>tests/</code> runs recorded
+call sequences (allocate, store, load, free, reuse, input, output, error, reset, out of memory) on the Zig kernel
+and on upstream <code>extism-runtime.wasm</code>, both on the js engine, and compares every result and every live
+block. The upstream file is a test fixture with its BSD-3-Clause license and SHA-256; it is not in the published
+package. The js engine accepts its externref global, so the fixture runs unchanged.</p>
+
+<h3 id="eng-1">ENG-1. The engine API (Call)</h3>
+<p>The engine package gives one API with two backends. Names are subject-first and values are typed:</p>
+<pre><code class="language-moonbit">pub enum Value { I32(Int); I64(Int64); F32(Float); F64(Double) }
+pub enum ValueType { I32; I64; F32; F64 }
+pub struct Signature { params : Array[ValueType]; results : Array[ValueType] }
+pub struct PageCount(..)     // PageCount::parse(Int) raise LimitError; 1 to 65536
+pub struct Budget(..)        // instructions per call, 1 to 2147483647 (the C int of WAMR)
+pub struct Deadline(..)      // milliseconds per call, more than 0
+pub enum Feature { Simd; Threads; Memory64; ExceptionHandling; Gc; TailCall; Unknown(String) }
+pub enum Bound { Enforced; NotEnforced }
+
+pub fn Feature::scan(Bytes) -&gt; Array[Feature] raise EngineError   // pure; both engines use it
+
+pub fn Engine::default() -&gt; Engine                       // WAMR on native, WebAssembly on js
+pub fn Engine::bounds(self) -&gt; Bounds                     // memory, budget, interruption
+pub fn Engine::compile(self, Bytes) -&gt; Module raise EngineError
+pub fn Module::imports(self) -&gt; Array[ImportDescriptor]
+pub fn Module::exports(self) -&gt; Array[ExportDescriptor]
+pub fn Module::instantiate(self, Imports, memory_ceiling~ : PageCount) -&gt; Instance raise EngineError
+pub fn Instance::call(self, String, Array[Value], budget? : Budget, deadline? : Deadline) -&gt; Array[Value] raise CallError
+pub fn Instance::memory(self) -&gt; Memory?                  // implements @wasi.GuestMemory
+pub fn Instance::export_function(self, String) -&gt; Function?</code></pre>
+<p><code>Imports</code> holds entries of a module name, a field name, a <code>Signature</code> and either a
+MoonBit closure (<code>(Caller, Array[Value]) -&gt; Array[Value] raise HostError</code>) or an exported
+<code>Function</code> of another instance. <code>Caller</code> gives the calling instance's memory. Errors are
+closed enums: <code>EngineError</code> (<code>Invalid</code>, <code>FeatureUnsupported(Feature)</code>,
+<code>LinkError</code>, <code>CeilingBelowInitial</code>) and <code>CallError</code> (<code>Trap(TrapKind)</code>,
+<code>BudgetExhausted</code>, <code>Interrupted</code>, <code>MemoryLimit</code>, <code>Host(HostError)</code>,
+<code>UnknownExport</code>). The engine does not know Extism.</p>
+<p>Imports are bound per instance. Two instances of one compiled module can have different closures and
+different exported functions for the same import, so two plugins from the same bytes each reach their own kernel.</p>
+<p><code>Feature::scan</code> is a pure MoonBit pass over the module bytes (section headers, limits flags and the
+opcodes of each function body). Both engines run it before they compile, so a module that needs a feature that
+the engine lacks fails with <code>FeatureUnsupported</code> and the feature name on native and on js. Each engine
+gives its set of supported features.</p>
+<p>A ceiling smaller than the initial pages of the module's memory is refused at instantiation with
+<code>CeilingBelowInitial</code>, which holds both page counts, on both engines.</p>
+<p>A <code>memory.grow</code> that the ceiling refuses returns -1 to the guest, and the engine records the refusal
+for the current call. When a call then fails, the error is <code>MemoryLimit</code>, not the trap that followed.
+On native the record comes from WAMR's enlarge-memory error callback. On js the memory rewrite of
+<a href="#eng-3">ENG-3</a> also sends each <code>memory.grow</code> through a function that it appends to the
+module, which records a result of -1.</p>
+
+<h3 id="eng-2">ENG-2. The native engine is the WAMR fast interpreter, vendored and built from C source (Owner, build Call)</h3>
+<p>The engine vendors the C source of <code>WAMR-2.4.5</code> that the fast interpreter needs (iwasm common,
+interpreter, shared platform and utils, mem-alloc) under <code>pkgs/extism/engine/wamr/</code>, with its license
+and an <code>UPSTREAM.md</code> that records the tag, the commit and the file list. The build settings follow
+WAMR's CMake: <code>INTERP=1</code>, <code>FAST_INTERP=1</code>, <code>AOT=0</code>, <code>JIT=0</code>,
+<code>LIBC_BUILTIN=0</code>, <code>LIBC_WASI=0</code> (the sandbox is ours), <code>BULK_MEMORY=1</code>,
+<code>REF_TYPES=1</code>, <code>INSTRUCTION_METERING=1</code>, <code>THREAD_MGR=1</code> (see
+<a href="#eng-4">ENG-4</a>), <code>MULTI_MODULE=0</code> and <code>SIMD</code> as the EXT-2 gate decides. The
+vendored tree keeps WAMR's <code>LICENSE</code> (Apache-2.0 WITH LLVM-exception), and
+<code>pkgs/extism/README.md</code> has a third-party note.</p>
+<p>Every host import, the kernel forwarders, the WASI functions and the embedder's functions, is registered with
+<code>wasm_runtime_register_natives_raw</code>. A raw native gets its arguments as an array of 64-bit cells and
+writes its results into the same array, so no <code>invokeNative</code> runs on any platform: no assembler is
+needed, Windows MSVC needs no MASM, and the <code>invokeNative_general.c</code> fault with <code>i64</code>
+arguments cannot occur. That file is not vendored.</p>
+<p>WAMR's native registry is process-global, and the resolution is written into the import entries of the
+compiled module. So the C stub registers one generic raw trampoline per import signature and name once per
+process, and binds nothing per instance in WAMR. When an instance is made, the stub puts its import table (the
+MoonBit closure or the exported function of another instance for each import) on the instance with
+<code>wasm_runtime_set_custom_data</code>. A trampoline finds the calling instance from its execution environment,
+reads that table with <code>wasm_runtime_get_custom_data</code> and calls the entry for its import. A test loads
+two plugins from one compiled module and checks that each reaches its own kernel.</p>
+<p><code>pkgs/extism/engine/wamr/build.zig</code> holds the source list and the defines, the same as the CMake
+selection. It builds and tests WAMR alone with Zig for every CLI platform in CI. It also writes the
+<code>native-stub</code> list and the <code>stub-cc-flags</code> of the engine's <code>moon.pkg</code>; a check
+fails when they differ. A consumer then builds the engine with its configured C compiler: Zig through
+<code>zig-cross</code> in finos/morphir-moonbit, MSVC on Windows. The first task of the engine group proves
+this on a fresh consumer on every platform, before other engine work depends on it.</p>
+<p><em>Alternatives.</em> A Moon pre-build step that runs <code>zig build</code> and links a static library: every
+consumer would need Zig on PATH at build time, and Windows MSVC linking of a Zig-built archive is less known. It
+is the fallback if <code>native-stub</code> cannot take the source list. The Wasmtime C API is the engine fallback
+of the EXT-2 gate.</p>
+
+<h3 id="eng-3">ENG-3. The js engine is WebAssembly; the memory ceiling is a module rewrite (Owner, details Call)</h3>
+<p>The js backend uses <code>WebAssembly.Module</code> and <code>WebAssembly.Instance</code> through
+<code>extern "js"</code>, so it runs on Node.js and browsers with no package. js has no instruction metering and
+cannot stop a synchronous call on the same thread, so its bounds report gives the budget and interruption as not
+enforced. The memory ceiling is enforced by a pure MoonBit function that rewrites the memory section's maximum to
+the ceiling before compile, as finos/morphir-moonbit does today. Imported memories are refused. The same rewrite
+appends one function and one global to the module: each <code>memory.grow</code> in a function body calls the
+appended function, which runs <code>memory.grow</code> and sets the global when the result is -1. Appended
+functions and globals take the next free indices, so no other index changes. The engine reads and clears the
+global for each call to report <code>MemoryLimit</code>.</p>
+
+<h3 id="eng-4">ENG-4. Native limits: maximum pages, metering and a watchdog deadline (Call)</h3>
+<p>On WAMR the memory ceiling is the instantiation argument for the maximum pages, also when the module declares no
+maximum. The budget is <code>wasm_runtime_set_instruction_count_limit</code> on the plugin's execution environment
+before each call; it is a C <code>int</code>, so a <code>Budget</code> is at most 2147483647. Kernel calls through
+the forwarders run on the kernel instance's own execution environment, so they do not count against the plugin's
+budget.</p>
+<p>The deadline is a watchdog thread in the C stub that calls <code>wasm_runtime_terminate</code> on the instance
+when the deadline passes. WAMR is built with <code>WASM_ENABLE_THREAD_MGR=1</code>, so that the fast interpreter
+sees the terminate flag at its <code>CHECK_SUSPEND_FLAGS</code> points, also in a tight loop. The watchdog is always
+cancelled and joined before <code>Instance::call</code> returns: after a normal return, a trap, an exhausted budget
+or a host error. A test runs many short calls with a deadline and checks that no thread is left. There is no
+fallback that reads the metering counter, because WAMR keeps it in a local of the interpreter loop.</p>
+<p>Where the stub cannot start a thread, or where <code>THREAD_MGR</code> is not viable on a platform, the bounds
+report gives interruption as not enforced by the engine, and only the instruction budget bounds a call there. The
+Morphir host still ends its worker process at its own deadline.</p>
+<p>The engine maps the WAMR exception text to <code>BudgetExhausted</code>, <code>Interrupted</code> or a
+<code>TrapKind</code> in the C stub, so MoonBit code never matches messages.</p>
+
+<h3 id="bnd-1">BND-1. Kernel binding per engine (Owner)</h3>
+<p>On js the kernel instance's exports are the plugin's <code>extism:host/env</code> imports, so a kernel call is
+a direct WASM-to-WASM call. On WAMR each kernel import is a native forwarder that calls the kernel instance, the
+pattern of <code>extism/wamr-sdk</code>, registered raw as <a href="#eng-2">ENG-2</a> says. WAMR multi-module
+linking is measured in the EXT-2 gate with a separate gate build that sets <code>MULTI_MODULE=1</code>, because
+the engine build fixes <code>MULTI_MODULE=0</code>; it replaces forwarding only if it is faster and works with the
+fast interpreter, and that needs a change to ENG-2. A native C-ABI build of the same Zig kernel is added only if
+the gate shows that forwarding is too slow; both builds then run the same Zig tests.</p>
+
+<h3 id="plg-1">PLG-1. The plugin API (Call)</h3>
+<pre><code class="language-moonbit">pub fn Manifest::new(Bytes) -&gt; Manifest
+pub fn Manifest::limits(self, Limits) -&gt; Manifest
+pub fn Manifest::policy(self, Policy) -&gt; Manifest
+pub fn Manifest::register(self, HostFunction) -&gt; Manifest raise ManifestError
+pub fn Manifest::wasi(self, @wasi.Sandbox) -&gt; Manifest
+pub fn Plugin::load(Manifest, engine? : @engine.Engine) -&gt; Plugin raise LoadError
+pub fn Plugin::has_function(self, ExportName) -&gt; Bool
+pub fn Plugin::call(self, ExportName, Bytes) -&gt; Bytes raise CallError
+pub fn Plugin::bounds(self) -&gt; @engine.Bounds
+
+pub fn HostFunction::new(Namespace, FunctionName, @engine.Signature,
+  (CallContext, Array[@engine.Value]) -&gt; Array[@engine.Value] raise HostError) -&gt; HostFunction
+pub fn CallContext::read(self, Handle) -&gt; Bytes raise MemoryError
+pub fn CallContext::allocate(self, Bytes) -&gt; Handle raise MemoryError</code></pre>
+<p>Manifest builder steps return a new value. <code>Namespace</code>, <code>FunctionName</code>,
+<code>ExportName</code> and <code>Handle</code> are validated types. <code>register</code> refuses a name in
+<code>extism:host/env</code> and a name that is already registered. The import check of a load is a pure function
+over the import descriptors and the manifest, tested without an engine.</p>
+<p>A call fails with a typed <code>CallError</code>: <code>Plugin(code, text)</code> for a non-zero return or a set
+error, <code>Exit(code)</code> for a non-zero <code>proc_exit</code>, <code>Denied(function)</code> for a denied
+Extism host function (for <code>http_request</code> it also holds the method and the URL of the refused request),
+<code>HostFunction(name, message)</code>, <code>MemoryLimit(memory)</code> for a refused grow of the plugin or the
+kernel memory, <code>Engine(@engine.CallError)</code> for a trap, an exhausted budget or an interruption,
+<code>Initialization</code> and <code>UnknownExport</code>. An <code>alloc</code> that the kernel refuses at its
+ceiling is a refused grow of the kernel memory, so a call that then fails reports <code>MemoryLimit(Kernel)</code>.</p>
+<p>The same manifest and input give the same output bytes, error kinds and host function calls on native and js,
+except where an outcome comes from a bound that only one engine enforces (the instruction budget and the
+deadline).</p>
+
+<h3 id="plg-2">PLG-2. Policy for the Extism host functions (Owner, defaults Call)</h3>
+<table>
+<thead><tr><th>Family</th><th>Choices</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td><code>config_get</code></td><td><code>Deny</code>, <code>Empty</code>, <code>Values(Map)</code></td><td><code>Empty</code>:
+handle 0</td></tr>
+<tr><td><code>var_get</code>, <code>var_set</code></td><td><code>Deny</code>, <code>Empty</code> (get gives 0, set is
+denied), <code>Session(limit)</code></td><td><code>Empty</code></td></tr>
+<tr><td><code>log_trace</code> to <code>log_error</code>, <code>get_log_level</code></td><td><code>Discard</code>,
+<code>Sink(level, sink)</code></td><td><code>Discard</code>; the level disables logging</td></tr>
+<tr><td><code>http_request</code>, <code>http_status_code</code>, <code>http_headers</code></td><td><code>Deny</code>,
+<code>Handler(handler)</code></td><td><code>Deny</code></td></tr>
+</tbody>
+</table>
+<p>The defaults give no authority and keep a plugin that reads configuration working. Every function is linked
+whatever the policy, so a plugin that imports it loads and fails only if it calls a denied function. The
+Morphir host uses this policy as WASM-4 in its own design says, and registers its four
+<code>extism:host/user</code> functions itself.</p>
+<p>The signatures in <code>extism:host/env</code> are the upstream ones:</p>
+<table>
+<thead><tr><th>Function</th><th>Signature</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td><code>config_get</code></td><td><code>(i64) -&gt; i64</code></td><td>A handle to the value, or 0</td></tr>
+<tr><td><code>var_get</code></td><td><code>(i64) -&gt; i64</code></td><td>A handle to the value, or 0</td></tr>
+<tr><td><code>var_set</code></td><td><code>(i64, i64) -&gt; ()</code></td><td>Value handle 0 removes the variable</td></tr>
+<tr><td><code>log_trace</code>, <code>log_debug</code>, <code>log_info</code>, <code>log_warn</code>,
+<code>log_error</code></td><td><code>(i64) -&gt; ()</code></td><td>None</td></tr>
+<tr><td><code>get_log_level</code></td><td><code>() -&gt; i32</code></td><td>0 trace to 4 error;
+2147483647 when logging is off</td></tr>
+<tr><td><code>http_request</code></td><td><code>(i64, i64) -&gt; i64</code></td><td>A handle to the response
+body, or 0</td></tr>
+<tr><td><code>http_status_code</code></td><td><code>() -&gt; i32</code></td><td>The status of the last
+response, or 0</td></tr>
+<tr><td><code>http_headers</code></td><td><code>() -&gt; i64</code></td><td>A handle to the JSON object of the last
+response headers, or 0</td></tr>
+</tbody>
+</table>
+
+<h3 id="wasi-1">WASI-1. The sandbox answers (Owner)</h3>
+<table>
+<thead><tr><th>Functions</th><th>Answer</th></tr></thead>
+<tbody>
+<tr><td><code>args_sizes_get</code>, <code>args_get</code>, <code>environ_sizes_get</code>,
+<code>environ_get</code></td><td>Zero entries; success</td></tr>
+<tr><td><code>fd_read</code> on fd 0</td><td>0 bytes (end of file)</td></tr>
+<tr><td><code>fd_write</code> on fd 1 and fd 2</td><td>The embedder's sinks; all bytes written</td></tr>
+<tr><td><code>clock_time_get</code>, <code>clock_res_get</code>, <code>random_get</code></td><td>The embedder's
+sources; <code>ENOTCAPABLE</code> (76) without one</td></tr>
+<tr><td><code>fd_fdstat_get</code> on fd 0, 1 and 2</td><td>Success: a character device with no flags; the
+rights are <code>fd_read</code> for fd 0 and <code>fd_write</code> for fd 1 and fd 2, and no inheriting
+rights</td></tr>
+<tr><td><code>fd_filestat_get</code> on fd 0, 1 and 2</td><td>Success: a character device with size 0, link count
+0 and all times 0</td></tr>
+<tr><td><code>proc_exit</code></td><td>Ends the call. Code 0 with no error set is a successful call that returns
+its output; any other code is an <code>Exit(code)</code> error</td></tr>
+<tr><td>Any function with an fd other than 0, 1 and 2</td><td><code>EBADF</code> (8)</td></tr>
+<tr><td>Every other function or operation of the 46 preview 1 functions</td><td><code>ENOTCAPABLE</code> (76)</td></tr>
+</tbody>
+</table>
+<p>The table is data in the <code>wasi</code> package, one entry per preview 1 function with its signature, so a
+test can check that every function of the pinned <code>wasi_snapshot_preview1</code> witx is linked. The WAMR
+socket extensions (<code>sock_open</code>, <code>sock_bind</code> and others) are not preview 1 and are not linked;
+the WAMR build has <code>LIBC_WASI=0</code>, so WAMR links no WASI function of its own.</p>
+
+<h3 id="gate-1">GATE-1. The EXT-2 qualification gate (Owner)</h3>
+<p>The gate runs directly after the WAMR build spike (task 2.1), before any other work builds on WAMR. It uses a
+minimal engine-level harness, not the plugin API: the embedded kernel, the raw-native kernel forwarders of
+<a href="#bnd-1">BND-1</a>, a stub WASI that answers every function with <code>ENOTCAPABLE</code>, and stubs for
+the four <code>extism:host/user</code> <code>morphir_*</code> functions.</p>
+<p><code>mise run qualify:engine</code> fetches the Morphir Python extension <code>0.4.2</code> module by a pinned
+URL and SHA-256 into <code>_build/</code>, and runs the compile request of the Morphir fixture through
+<code>handle</code> with metering on and a budget of 1,000,000,000 instructions. It records the time of each call
+and the instructions used. A separate gate build with <code>MULTI_MODULE=1</code> runs the same request with
+multi-module linking in place of the forwarders. The gate passes when the compile finishes within 30 seconds on
+the slowest qualified platform. The results go to bead <code>morphir-ukvn.5.64.36.4</code> as a comment. If the
+gate fails, the engine group switches to the Wasmtime C API behind the same engine API, and this design is updated
+first.</p>
+
+<h3 id="rel-1">REL-1. Release (Call)</h3>
+<p>The first release is <code>0.1.0</code>, published to Mooncakes by a release workflow that runs only after the
+maintainer approves the version change, adapted from moon-lander's <code>release.yml</code>. A fresh module
+outside the repository pins the exact version and builds on native and js before the GitHub release is made.</p>
+
+<h2 id="risks">Risks and trade-offs</h2>
+<table>
+<thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+<tbody>
+<tr><td>WAMR's interpreter is too slow for Python compiles</td><td>GATE-1 measures the real fixture first; the
+Wasmtime C API is the named fallback behind the same engine API.</td></tr>
+<tr><td>Moon's <code>native-stub</code> cannot take the WAMR source list, include paths or defines</td><td>ENG-2's
+first task proves it on a fresh consumer on every platform; the pre-build static library is the fallback.</td></tr>
+<tr><td><code>wasm_runtime_terminate</code> is seen only at check points that need WAMR's thread manager</td><td>The
+build sets <code>THREAD_MGR=1</code>, and the deadline scenario is a test on every platform. Where the thread
+manager is not viable, the bounds report gives interruption as not enforced, and the embedder ends its
+worker.</td></tr>
+<tr><td>A watchdog thread outlives its call</td><td>The stub cancels and joins the watchdog on every return path; a
+test runs many short calls and checks that no thread is left.</td></tr>
+<tr><td>Zig builds of the kernel differ between hosts or Zig releases</td><td><code>check:kernel</code> runs on
+Linux and macOS; Zig is pinned with finos/morphir-moonbit's pin.</td></tr>
+<tr><td>The Python module needs SIMD or another feature that the fast interpreter build lacks</td><td>GATE-1 records
+the feature error with its name; SIMD is enabled only if the fixture needs it and the gate still passes.</td></tr>
+<tr><td>A conformant plugin needs a WASI answer other than an error</td><td>The plugin fails with its own
+diagnostic. Fixture plugins built with upstream PDKs exercise the start-up calls; a new answer needs a reviewed
+change to WASI-1.</td></tr>
+<tr><td>The vendored WAMR source makes the Mooncakes archive large</td><td>Vendor only the fast-interpreter files;
+record the archive size in the release task.</td></tr>
+<tr><td>The js engine cannot stop a runaway call</td><td>The bounds report says so; embedders run plugins in a
+worker and terminate it, as finos/morphir-moonbit does.</td></tr>
+</tbody>
+</table>
+
+<h2 id="migration">Migration plan</h2>
+<p>None: the packages are new. finos/morphir-moonbit adopts the first published version in its group 5.</p>
+
+<h2 id="open-questions">Open questions</h2>
+<ul>
+<li>The exact default ceiling of kernel memory. The spec fixes 4096 pages for any instance; a smaller kernel
+default can come later without a spec change to the plugin memory.</li>
+<li>Whether the native engine keeps one engine runtime per process or per plugin. This does not change the API.</li>
+</ul>
+</main>
+</body>
+</html>
