@@ -128,12 +128,20 @@ description = "Run the EXT-2 engine gate: the Python extension 0.4.2 compile on 
 run = "moonx scripts/toolchain.mbtx scripts/qualify.mbtx"
 
 [tasks."vendor:wamr"]
-description = "Vendor the WAMR source from a checkout at the pinned commit into pkgs/extism/engine/wamr (args: checkout)"
+description = "Vendor the WAMR and SIMDe sources from checkouts at the pinned commits into pkgs/extism/engine/wamr (args: wamr-checkout simde-checkout)"
 run = "moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx"
+
+[tasks."check:wamr"]
+description = "Compare each vendored WAMR and SIMDe file with its SHA-256 in pkgs/extism/engine/wamr/UPSTREAM.md"
+run = "moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx check"
 
 [tasks."check:consumer"]
 description = "Build and run a fresh consumer of moonrockz/extism outside the repository (args: targets; default: native js)"
 run = "moonx scripts/toolchain.mbtx scripts/consumer.mbtx"
+
+[tasks."test:moonbit-guest"]
+description = "Check that the portable MoonBit MEP guest (model.wasm, with SIMD) answers describe on native and js (args: path of model.wasm)"
+run = "moonx scripts/toolchain.mbtx scripts/moonbit-guest.mbtx"
 
 [tasks."test:python"]
 description = "Check that the Python extension 0.4.1 and 0.4.2 give the pinned info and describe responses on native and js (args: --browser)"

@@ -6,9 +6,3 @@ test "js engine report: the memory ceiling is enforced, the budget and interrupt
     interruption: NotEnforced,
   })
 }
-
-///|
-test "the js engine supports simd" {
-  let instance = compile(@fixtures.simd()).instantiate(@engine.Imports::new())
-  assert_eq(instance.call("v", []), [])
-}

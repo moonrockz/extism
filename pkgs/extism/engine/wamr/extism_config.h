@@ -22,12 +22,13 @@
 #define WASM_ENABLE_LIBC_WASI 0
 #define WASM_ENABLE_LIBC_UVWASI 0
 
-/* Features: bulk memory and reference types, as the Morphir Python extension needs; no SIMD (the
-   EXT-2 gate passed without it), no shared memory, no threads, no memory64, no GC, no exceptions,
-   no tail calls. */
+/* Features: bulk memory and reference types, as the Morphir Python extension needs, and SIMD, which
+   MoonBit guests use; the fast interpreter runs SIMD through the SIMDe headers in simde/ (ENG-2). No
+   shared memory, no threads, no memory64, no multi-memory, no GC, no exceptions, no tail calls. */
 #define WASM_ENABLE_BULK_MEMORY 1
 #define WASM_ENABLE_REF_TYPES 1
-#define WASM_ENABLE_SIMD 0
+#define WASM_ENABLE_SIMD 1
+#define WASM_ENABLE_SIMDE 1
 #define WASM_ENABLE_SHARED_MEMORY 0
 #define WASM_ENABLE_LIB_PTHREAD 0
 #define WASM_ENABLE_LIB_WASI_THREADS 0

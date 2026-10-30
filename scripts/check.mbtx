@@ -8,8 +8,8 @@ import {
 ----
 
 ///|
-/// Run the full local gate: lint, validate, OpenSpec validation, tests, task script tests, builds and
-/// the docs site.
+/// Run the full local gate: lint, validate, the vendored WAMR check, OpenSpec validation, tests, task
+/// script tests, builds and the docs site.
 ///
 /// Usage: `mise run check`, or `moonx scripts/toolchain.mbtx scripts/check.mbtx`.
 
@@ -18,8 +18,8 @@ async fn main {
   println("🔍 Running all checks...")
   for
     task in [
-      "lint", "validate", "openspec:validate", "test", "test:scripts", "build", "build:site",
-      "check:site",
+      "lint", "validate", "check:wamr", "openspec:validate", "test", "test:scripts",
+      "build", "build:site", "check:site",
     ] {
     println("")
     println("=== \{task} ===")

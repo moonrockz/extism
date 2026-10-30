@@ -132,9 +132,13 @@ or `gc`. When the engine cannot name the feature, the error SHALL say that it is
 find the feature with the same pure scan of the module bytes, so that the native and the js engine name the same
 feature.
 
-#### Scenario: SIMD module on an engine built without SIMD
-- **WHEN** a module with a `v128` instruction loads on an engine built without SIMD
-- **THEN** the load fails with a feature error that names `simd`, before any call
+#### Scenario: SIMD on both engines
+- **WHEN** a module with `v128` instructions loads and runs on the native and on the js engine
+- **THEN** both engines give `simd` in their feature set, and the calls give the same results
+
+#### Scenario: Feature that the engine does not support
+- **WHEN** a module with a shared memory loads on either engine
+- **THEN** the load fails with a feature error that names `threads`, before any call
 
 #### Scenario: Feature scan
 - **WHEN** the scan reads a module with a `v128` instruction, a shared memory and a 64-bit memory

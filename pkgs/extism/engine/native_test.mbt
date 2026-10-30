@@ -67,16 +67,6 @@ test "the watchdog is joined after a trap and after an exhausted budget" {
 }
 
 ///|
-test "SIMD module on an engine built without SIMD: the load names simd" {
-  let error = try compile(@fixtures.simd()) catch {
-    error => error
-  } noraise {
-    _ => fail("the load must fail")
-  }
-  assert_true(error is FeatureUnsupported(Simd))
-}
-
-///|
 test "a budget large enough lets the call finish" {
   let instance = compile(@fixtures.add()).instantiate(@engine.Imports::new())
   let budget = @engine.Budget::parse(100L)

@@ -1666,10 +1666,7 @@ execute_post_instantiate_functions(WASMModuleInstance *module_inst,
 
     /* Execute possible "__post_instantiate" function if wasm app is
        compiled by emsdk's early version */
-    if (!is_sub_inst) {
-        post_inst_func =
-            lookup_post_instantiate_func(module_inst, "__post_instantiate");
-    }
+    /* moonrockz/extism: the embedder runs the guest's start-up exports itself (UPSTREAM.md). */
 
 #if WASM_ENABLE_BULK_MEMORY != 0
     /* Only execute the memory init function for main instance since
@@ -1679,8 +1676,8 @@ execute_post_instantiate_functions(WASMModuleInstance *module_inst,
         && !module->import_wasi_api
 #endif
     ) {
-        call_ctors_func =
-            lookup_post_instantiate_func(module_inst, "__wasm_call_ctors");
+        /* moonrockz/extism: the embedder calls __wasm_call_ctors itself (UPSTREAM.md). */
+        call_ctors_func = NULL;
     }
 #endif
 

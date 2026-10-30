@@ -12,3 +12,7 @@ bytes. It is not published.
   The test checks the SHA-256 of each fixture.
 - `python/`: the Morphir Python extension `0.4.1` and `0.4.2` answer `morphir_extension_info` and a
   `describe` request through `handle`. `mise run test:python` fetches the pinned modules first.
+- `moonbit_guest/`: the portable Morphir MEP extension of finos/morphir-moonbit (`model.wasm`, which uses
+  SIMD) answers a `describe` request and an exit request through the `morphir_bytes_v1` byte ABI on the
+  engine. It has no published release yet: build it with `mise run package:mep-extension` in that repository,
+  and run `mise run test:moonbit-guest -- <model.wasm>`.

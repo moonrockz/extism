@@ -22,6 +22,8 @@ pub fn plugin() -> Bytes
 
 pub fn simd() -> Bytes
 
+pub fn simd_probe() -> Bytes
+
 pub fn traps() -> Bytes
 
 pub fn unknown_import() -> Bytes

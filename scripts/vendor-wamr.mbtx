@@ -3,6 +3,7 @@ import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
   "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
   "moonbitlang/x@0.5.6/crypto",
   "moonbitlang/x@0.5.6/sys",
@@ -20,16 +21,30 @@ import {
 /// `wamr/extism_config.h` first and selects the source for the platform, and `wamr/UPSTREAM.md` with
 /// the tag, the commit and the SHA-256 of each copied upstream file.
 ///
-/// Usage: `mise run vendor:wamr -- <checkout>`, or
-/// `moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx <checkout>`, where `<checkout>` is a git
-/// checkout of WAMR at the pinned commit. It exits with 0 on success, 1 on a failure and 2 on a usage
-/// error.
+/// The fast interpreter's SIMD needs the SIMDe headers. The script copies the headers that
+/// `simde/wasm/simd128.h` includes, with the SIMDe license, into `wamr/simde/`, and rewrites WAMR's
+/// include of SIMDe into a relative path too.
+///
+/// Usage: `mise run vendor:wamr -- <wamr-checkout> <simde-checkout>`, where each checkout is a git
+/// checkout at the pinned commit. `mise run check:wamr` (`vendor-wamr.mbtx check`) compares each
+/// vendored file with the SHA-256 that UPSTREAM.md gives for it, and fails on a file that is changed,
+/// missing or not listed. It exits with 0 on success, 1 on a failure and 2 on a usage error.
 
 ///|
 let wamr_tag : String = "WAMR-2.4.5"
 
 ///|
 let wamr_commit : String = "25bd7eb63e828e4bd242cc9b38d260b4b31c6605"
+
+///|
+let simde_tag : String = "v0.8.2"
+
+///|
+let simde_commit : String = "71fd833d9666141edcd1d3c109a80e228303d8d7"
+
+///|
+/// The SIMDe header that WAMR includes, relative to the `simde/` directory of a SIMDe checkout.
+let simde_entry : String = "wasm/simd128.h"
 
 ///|
 let destination : String = "pkgs/extism/engine/wamr"
@@ -190,6 +205,10 @@ test "relative gives a path from a directory to a file" {
     "../../shared/utils/bh_platform.h",
   )
   assert_eq(relative("", "config.h"), "config.h")
+  assert_eq(
+    relative("iwasm/interpreter", "../simde/wasm/simd128.h"),
+    "../../../simde/wasm/simd128.h",
+  )
 }
 
 ///|
@@ -221,6 +240,10 @@ test "included_name reads quoted includes only" {
 fn resolve(file : String, name : String, exists : (String) -> Bool) -> String? {
   if name == "platform_internal.h" {
     return Some("../extism_platform_internal.h")
+  }
+  // The SIMDe headers are in `wamr/simde/`, beside `core/`.
+  if name is ['s', 'i', 'm', 'd', 'e', '/', .. rest] {
+    return Some("../simde/\{rest}")
   }
   let beside = normalize(directory(file) + "/" + name)
   if exists(beside) {
@@ -261,56 +284,139 @@ test "rewrite makes include-directory includes relative" {
     rewrite("iwasm/common/wasm_native.c", source, exists),
     "#include \"wasm_native.h\"\n#include \"../../shared/utils/bh_log.h\"\n#include \"../../../extism_platform_internal.h\"\n#include \"gone.h\"\n#include <stdio.h>",
   )
+  assert_eq(
+    rewrite(
+      "iwasm/interpreter/wasm_interp_fast.c", "#include \"simde/wasm/simd128.h\"",
+      exists,
+    ),
+    "#include \"../../../simde/wasm/simd128.h\"",
+  )
 }
 
 ///|
-/// The patches that the engine needs in the WAMR source: the file, the upstream text and its
-/// replacement. UPSTREAM.md lists them.
-let patches : Array[(String, String, String, String)] = [
-  (
-    "iwasm/interpreter/wasm_interp_fast.c",
-    "The switch dispatch of the fast interpreter, which compilers with no computed goto use (MSVC), " +
-    "does not meter instructions; it runs CHECK_INSTRUCTION_LIMIT for each instruction, as the " +
-    "computed-goto dispatch does.",
-    "    while (frame_ip < frame_ip_end) {\n        opcode = *frame_ip++;\n",
-    "    while (frame_ip < frame_ip_end) {\n        /* moonrockz/extism: meter the switch dispatch too (UPSTREAM.md). */\n        CHECK_INSTRUCTION_LIMIT();\n        opcode = *frame_ip++;\n",
-  ),
+/// A local change of the WAMR source: the file, the reason for UPSTREAM.md, and the hunks, each an
+/// upstream text and its replacement.
+struct Patch {
+  file : String
+  reason : String
+  hunks : Array[(String, String)]
+}
+
+///|
+/// The patches that the engine needs in the WAMR source. UPSTREAM.md lists them with their reasons.
+let patches : Array[Patch] = [
+  {
+    file: "iwasm/interpreter/wasm_interp_fast.c",
+    reason: "The switch dispatch of the fast interpreter, which compilers with no computed goto use " +
+    "(MSVC), does not meter instructions; the patch runs CHECK_INSTRUCTION_LIMIT for each " +
+    "instruction, as the computed-goto dispatch does. Upstream fixed it after WAMR-2.4.5 in commit " +
+    "ea5dd88e9ca40a44b6a5d9ffeb87a20833b13b8a (pull request #5141, issue #5140); remove this patch " +
+    "at the next WAMR upgrade.",
+    hunks: [
+      (
+        "    while (frame_ip < frame_ip_end) {\n        opcode = *frame_ip++;\n",
+        "    while (frame_ip < frame_ip_end) {\n        /* moonrockz/extism: meter the switch dispatch too (UPSTREAM.md). */\n        CHECK_INSTRUCTION_LIMIT();\n        opcode = *frame_ip++;\n",
+      ),
+    ],
+  },
+  {
+    file: "iwasm/interpreter/wasm_interp_fast.c",
+    reason: "The SIMD code of the fast interpreter converts a V128 to a SIMDe value with a GNU " +
+    "statement expression, which MSVC does not compile; the patch uses a static inline function. " +
+    "Upstream WAMR builds SIMDe on no Windows platform (build-scripts/runtime_lib.cmake), at " +
+    "WAMR-2.4.5 and at main f8ed1f442969c806ced7b127d4e4d397bf051737 (2026-10-28) alike.",
+    hunks: [
+      (
+        "\ntypedef int32 CellType_I32;\n", "\n#if WASM_ENABLE_SIMDE != 0\n/* moonrockz/extism: a function instead of a GNU statement expression, for MSVC (UPSTREAM.md). */\nstatic inline simde_v128_t\nextism_simd_v128_to_simde_v128(V128 s_v)\n{\n    simde_v128_t se_v;\n    bh_assert(sizeof(V128) == sizeof(simde_v128_t));\n    bh_memcpy_s(&se_v, sizeof(simde_v128_t), &s_v, sizeof(V128));\n    return se_v;\n}\n#endif\n\ntypedef int32 CellType_I32;\n",
+      ),
+      (
+        "#define SIMD_V128_TO_SIMDE_V128(s_v)                                    \\\n    ({                                                                  \\\n        bh_assert(sizeof(V128) == sizeof(simde_v128_t));                \\\n        simde_v128_t se_v;                                              \\\n        bh_memcpy_s(&se_v, sizeof(simde_v128_t), &(s_v), sizeof(V128)); \\\n        se_v;                                                           \\\n    })\n",
+        "#define SIMD_V128_TO_SIMDE_V128(s_v) extism_simd_v128_to_simde_v128(s_v)\n",
+      ),
+    ],
+  },
+  {
+    file: "iwasm/interpreter/wasm_runtime.c",
+    reason: "The instantiation runs the guest's `__post_instantiate` and `__wasm_call_ctors` exports, " +
+    "with no instruction budget and no deadline, and the Extism plugin runs its start-up exports " +
+    "again; no WAMR setting or API skips them. The patch keeps only the wasm start function, so " +
+    "that the plugin's own start-up (`_initialize` and `hs_init`, else `__wasm_call_ctors`, as " +
+    "upstream Extism) is the only one and runs under the plugin's bounds.",
+    hunks: [
+      (
+        "    if (!is_sub_inst) {\n        post_inst_func =\n            lookup_post_instantiate_func(module_inst, \"__post_instantiate\");\n    }\n",
+        "    /* moonrockz/extism: the embedder runs the guest's start-up exports itself (UPSTREAM.md). */\n",
+      ),
+      (
+        "        call_ctors_func =\n            lookup_post_instantiate_func(module_inst, \"__wasm_call_ctors\");\n",
+        "        /* moonrockz/extism: the embedder calls __wasm_call_ctors itself (UPSTREAM.md). */\n        call_ctors_func = NULL;\n",
+      ),
+    ],
+  },
 ]
 
 ///|
-/// The source of `file` with its patches. A patch whose upstream text is not in the file, or is there
+/// The source of `file` with its patches. A hunk whose upstream text is not in the file, or is there
 /// more than once, is an error.
 fn patch(file : String, source : String) -> String raise VendorError {
   let mut text = source
   for entry in patches {
-    let (target, _, before, after) = entry
-    guard target == file else { continue }
-    let parts = text.split(before).collect()
-    guard parts.length() == 2 else {
-      raise VendorError(
-        "the patch of \{file} does not match its upstream text once",
-      )
+    guard entry.file == file else { continue }
+    for hunk in entry.hunks {
+      let (before, after) = hunk
+      let parts = text.split(before).collect()
+      guard parts.length() == 2 else {
+        raise VendorError(
+          "a patch of \{file} does not match its upstream text once",
+        )
+      }
+      text = parts[0].to_owned() + after + parts[1].to_owned()
     }
-    text = parts[0].to_owned() + after + parts[1].to_owned()
   }
   text
 }
 
 ///|
-test "patch replaces the upstream text once and refuses a text that is not there" {
-  let before = "x\n    while (frame_ip < frame_ip_end) {\n        opcode = *frame_ip++;\ny"
-  let after = patch("iwasm/interpreter/wasm_interp_fast.c", before)
+test "patch replaces each upstream text once and refuses a text that is not there" {
+  let file = "iwasm/interpreter/wasm_interp_fast.c"
+  let before = patches
+    .iter()
+    .filter(p => p.file == file)
+    .flat_map(p => p.hunks.iter().map(h => h.0))
+    .collect()
+    .join("\n/* between */\n")
+  let after = patch(file, before)
   assert_true(
     after.contains("CHECK_INSTRUCTION_LIMIT();\n        opcode = *frame_ip++;"),
   )
+  assert_true(
+    after.contains(
+      "#define SIMD_V128_TO_SIMDE_V128(s_v) extism_simd_v128_to_simde_v128(s_v)",
+    ),
+  )
+  assert_false(after.contains("({"))
   assert_eq(patch("shared/utils/bh_log.c", before), before)
   assert_true(
-    try patch("iwasm/interpreter/wasm_interp_fast.c", "no loop") catch {
+    try patch(file, "no loop") catch {
       VendorError(_) => true
     } noraise {
       _ => false
     },
   )
+}
+
+///|
+test "the start-up patch keeps no lookup of __post_instantiate or __wasm_call_ctors" {
+  let file = "iwasm/interpreter/wasm_runtime.c"
+  let before = patches
+    .iter()
+    .filter(p => p.file == file)
+    .flat_map(p => p.hunks.iter().map(h => h.0))
+    .collect()
+    .join("\n")
+  let after = patch(file, before)
+  assert_false(after.contains("lookup_post_instantiate_func"))
+  assert_true(after.contains("call_ctors_func = NULL;"))
 }
 
 ///|
@@ -389,13 +495,207 @@ async fn make_dirs(path : String) -> Unit {
 }
 
 ///|
-async fn vendor(checkout : String) -> Unit {
+/// The SHA-256 of `bytes` in hex.
+fn digest(bytes : Bytes) -> String {
+  @crypto.bytes_to_hex_string(@crypto.sha256(bytes))
+}
+
+///|
+/// One row of the file table of UPSTREAM.md: the path relative to `wamr/`, the SHA-256 of the
+/// upstream file (none for a file that the script makes), and the SHA-256 of the vendored file.
+struct Row {
+  path : String
+  upstream : String?
+  vendored : String
+}
+
+///|
+fn Row::line(self : Row) -> String {
+  let upstream = match self.upstream {
+    Some(hash) => "`\{hash}`"
+    None => "(made by the script)"
+  }
+  "| `\{self.path}` | \{upstream} | `\{self.vendored}` |"
+}
+
+///|
+/// The rows of the file table in the text of UPSTREAM.md.
+fn rows_of(text : String) -> Array[Row] {
+  text
+  .split("\n")
+  .filter_map(line => {
+    let cells = line
+      .split("|")
+      .map(cell => cell.trim(chars=" ").to_owned())
+      .collect()
+    guard cells.length() == 5 &&
+      cells[1] is ['`', .. path] &&
+      path is [.. path, '`'] &&
+      cells[3] is ['`', .. vendored] &&
+      vendored is [.. vendored, '`'] &&
+      vendored.length() == 64 else {
+      return None
+    }
+    let upstream = match cells[2] {
+      ['`', .. hash] if hash is [.. hash, '`'] => Some(hash.to_owned())
+      _ => None
+    }
+    Some({ path: path.to_owned(), upstream, vendored: vendored.to_owned(), })
+  })
+  .collect()
+}
+
+///|
+test "rows_of reads the file table and Row::line writes it" {
+  let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  let rows = [
+    { path: "core/config.h", upstream: Some(hash), vendored: hash, },
+    { path: "unit/wamr_bh_log.c", upstream: None, vendored: hash, },
+  ]
+  let text = "# Title\n\n| File | Upstream SHA-256 | Vendored SHA-256 |\n| --- | --- | --- |\n" +
+    rows.map(Row::line).join("\n")
+  let read = rows_of(text)
+  assert_eq(read.length(), 2)
+  assert_eq(read[0].path, "core/config.h")
+  assert_eq(read[0].upstream, Some(hash))
+  assert_eq(read[1].upstream, None)
+  assert_eq(read[1].vendored, hash)
+}
+
+///|
+/// The differences between the vendored files and the rows: a changed, missing or unlisted file.
+fn differences(rows : Array[Row], files : Map[String, String]) -> Array[String] {
+  let listed : Map[String, Bool] = Map::from_array(
+    rows.map(row => (row.path, true)),
+  )
+  let found = rows.filter_map(row => {
+    match files.get(row.path) {
+      None => Some("\{row.path} is missing")
+      Some(hash) if hash != row.vendored =>
+        Some("\{row.path} differs from its SHA-256 in UPSTREAM.md")
+      Some(_) => None
+    }
+  })
+  for path, _ in files {
+    if !listed.contains(path) {
+      found.push("\{path} is not listed in UPSTREAM.md")
+    }
+  }
+  found
+}
+
+///|
+test "differences finds changed, missing and unlisted files" {
+  let rows = [
+    { path: "a.c", upstream: None, vendored: "1", },
+    { path: "b.c", upstream: None, vendored: "2", },
+    { path: "c.c", upstream: None, vendored: "3", },
+  ]
+  let files : Map[String, String] = Map([
+    ("a.c", "1"),
+    ("b.c", "9"),
+    ("d.c", "4"),
+  ])
+  assert_eq(differences(rows, files), [
+    "b.c differs from its SHA-256 in UPSTREAM.md", "c.c is missing", "d.c is not listed in UPSTREAM.md",
+  ])
+}
+
+///|
+/// The vendored files under `wamr/` that UPSTREAM.md lists: everything but the engine's own files.
+let own_files : Array[String] = [
+  "UPSTREAM.md", "extism_config.h", "extism_engine.c", "extism_platform_internal.h",
+]
+
+///|
+/// Every file under `dir`, relative to `root`, recursively.
+async fn all_files(root : String, dir : String) -> Array[String] {
+  let found = []
+  let base = if dir == "" { root } else { "\{root}/\{dir}" }
+  for entry in @fs.readdir(base, sort=true) {
+    let path = if dir == "" { entry } else { "\{dir}/\{entry}" }
+    match @fs.kind("\{root}/\{path}") {
+      Directory => found.append(all_files(root, path))
+      Regular => found.push(path)
+      _ => ()
+    }
+  }
+  found
+}
+
+///|
+/// Compares each vendored file with its SHA-256 in UPSTREAM.md.
+async fn check() -> Unit {
+  let rows = rows_of(@fs.read_file("\{destination}/UPSTREAM.md").text())
+  guard !rows.is_empty() else {
+    raise VendorError("UPSTREAM.md has no file table")
+  }
+  let files : Map[String, String] = Map([])
+  for path in all_files(destination, "") {
+    guard !own_files.contains(path) else { continue }
+    files[path] = digest(@fs.read_file("\{destination}/\{path}").binary())
+  }
+  let found = differences(rows, files)
+  guard found.is_empty() else {
+    for line in found {
+      eprintln("  \{line}")
+    }
+    raise VendorError(
+      "\{found.length()} vendored files do not match UPSTREAM.md; run scripts/vendor-wamr.mbtx again",
+    )
+  }
+  println(
+    "✅ \{rows.length()} vendored files match their SHA-256 in \{destination}/UPSTREAM.md",
+  )
+}
+
+///|
+async fn head_of(checkout : String) -> String {
   let (code, head, _) = @process.collect_output("git", [
     "-C", checkout, "rev-parse", "HEAD",
   ])
-  guard code == 0 && head.text().trim() == wamr_commit else {
+  if code == 0 {
+    head.text().trim().to_owned()
+  } else {
+    ""
+  }
+}
+
+///|
+/// The headers of SIMDe that `simde_entry` includes, relative to the `simde/` directory of the
+/// checkout, following each quoted include.
+async fn simde_headers(simde : String) -> Array[String] {
+  let files = [simde_entry]
+  let known : Map[String, Bool] = Map([(simde_entry, true)])
+  let mut next = 0
+  while next < files.length() {
+    let file = files[next]
+    next += 1
+    for line in @fs.read_file("\{simde}/\{file}").text().split("\n") {
+      guard included_name(line.to_owned()) is Some(name) else { continue }
+      let beside = normalize(directory(file) + "/" + name)
+      if !known.contains(beside) &&
+        !beside.has_prefix("..") &&
+        @fs.exists("\{simde}/\{beside}") {
+        known[beside] = true
+        files.push(beside)
+      }
+    }
+  }
+  files.sort()
+  files
+}
+
+///|
+async fn vendor(checkout : String, simde_checkout : String) -> Unit {
+  guard head_of(checkout) == wamr_commit else {
     raise VendorError(
       "\{checkout} is not a WAMR checkout at \{wamr_tag} (\{wamr_commit})",
+    )
+  }
+  guard head_of(simde_checkout) == simde_commit else {
+    raise VendorError(
+      "\{simde_checkout} is not a SIMDe checkout at \{simde_tag} (\{simde_commit})",
     )
   }
   let core = "\{checkout}/core"
@@ -429,29 +729,35 @@ async fn vendor(checkout : String) -> Unit {
   }
   files.sort()
   let exists = (path : String) => known.contains(path)
-  let target = "\{destination}/core"
-  if @fs.exists(target) {
-    @fs.rmdir(target, recursive=true)
+  for dir in ["core", "simde", "unit"] {
+    if @fs.exists("\{destination}/\{dir}") {
+      @fs.rmdir("\{destination}/\{dir}", recursive=true)
+    }
   }
-  let manifest = StringBuilder()
+  let rows : Array[Row] = []
+  // Writes a vendored file and its row.
+  let put = async fn(path : String, upstream : Bytes?, bytes : Bytes) {
+    let out = "\{destination}/\{path}"
+    make_dirs(directory(out))
+    @fs.write_file(out, bytes)
+    rows.push({ path, upstream: upstream.map(digest), vendored: digest(bytes), })
+  }
   for file in files {
     let data = @fs.read_file("\{core}/\{file}")
-    let bytes = data.binary()
-    let digest = @crypto.bytes_to_hex_string(@crypto.sha256(bytes))
-    manifest.write_string("| `core/\{file}` | `\{digest}` |\n")
-    let out = "\{target}/\{file}"
-    make_dirs(directory(out))
-    @fs.write_file(out, patch(file, rewrite(file, data.text(), exists)))
+    let text = patch(file, rewrite(file, data.text(), exists))
+    put("core/\{file}", Some(data.binary()), @utf8.encode(text))
   }
-  @fs.write_file(
-    "\{destination}/LICENSE",
-    @fs.read_file("\{checkout}/LICENSE").binary(),
-  )
-  let units = "\{destination}/unit"
-  if @fs.exists(units) {
-    @fs.rmdir(units, recursive=true)
+  for name in ["LICENSE", "ATTRIBUTIONS.md"] {
+    let bytes = @fs.read_file("\{checkout}/\{name}").binary()
+    put(name, Some(bytes), bytes)
   }
-  make_dirs(units)
+  let simde = "\{simde_checkout}/simde"
+  for header in simde_headers(simde) {
+    let bytes = @fs.read_file("\{simde}/\{header}").binary()
+    put("simde/\{header}", Some(bytes), bytes)
+  }
+  let license = @fs.read_file("\{simde_checkout}/COPYING").binary()
+  put("simde/COPYING", Some(license), license)
   let stubs = []
   for entry in sources {
     let (source, condition) = entry
@@ -459,33 +765,40 @@ async fn vendor(checkout : String) -> Unit {
       raise VendorError("WAMR source core/\{source} is missing")
     }
     let name = unit_name(source, condition)
-    @fs.write_file("\{units}/\{name}", unit_source(source, condition))
+    put("unit/\{name}", None, @utf8.encode(unit_source(source, condition)))
     stubs.push("wamr/unit/\{name}")
   }
+  rows.sort_by_key(row => row.path)
   @fs.write_file(
     "\{destination}/UPSTREAM.md",
     (
-      $|# Vendored WAMR
+      $|# Vendored WAMR and SIMDe
       $|
       $|The C source of the WebAssembly Micro Runtime (WAMR) that the native engine builds, from
       $|https://github.com/bytecodealliance/wasm-micro-runtime. License: Apache-2.0 WITH LLVM-exception
-      $|(`LICENSE`).
+      $|(`LICENSE`); WAMR's notes on the work that it reuses are in `ATTRIBUTIONS.md`. The SIMD
+      $|instructions of the fast interpreter use the SIMDe headers in `simde/`, from
+      $|https://github.com/simd-everywhere/simde. License: MIT (`simde/COPYING`).
       $|
-      $|Do not edit the files under `core/` or `unit/`: `scripts/vendor-wamr.mbtx` writes them. It copies the
-      $|files with their layout and rewrites each quoted `#include` that WAMR resolves through an include
-      $|directory of its CMake build into a path relative to the including file, so that the engine
-      $|builds with no include path. `extism_config.h` holds the build settings.
+      $|Do not edit the files under `core/`, `simde/` or `unit/`: `scripts/vendor-wamr.mbtx` writes
+      $|them. It copies the WAMR files with their layout and rewrites each quoted `#include` that WAMR
+      $|resolves through an include directory of its CMake build into a path relative to the
+      $|including file, so that the engine builds with no include path. `extism_config.h` holds the
+      $|build settings. `mise run check:wamr` compares each file with its SHA-256 below.
       $|
     ) +
-    "- Tag: `\{wamr_tag}`\n- Commit: `\{wamr_commit}`\n\n## Patches\n\n" +
-    patches.map(p => "- `core/\{p.0}`: \{p.1}").join("\n") +
+    "- WAMR tag: `\{wamr_tag}`\n- WAMR commit: `\{wamr_commit}`\n" +
+    "- SIMDe tag: `\{simde_tag}`\n- SIMDe commit: `\{simde_commit}`\n\n## Patches\n\n" +
+    patches.map(p => "- `core/\{p.file}`: \{p.reason}").join("\n") +
     "\n\n## Translation units\n\n" +
     stubs.map(stub => "- `\{stub}`").join("\n") +
-    "\n\n## Files and the SHA-256 of each upstream file\n\n| File | SHA-256 |\n| --- | --- |\n" +
-    manifest.to_string(),
+    "\n\n## Files\n\nThe SHA-256 of each upstream file, and of the vendored file after the include " +
+    "rewrite and the patches.\n\n| File | Upstream SHA-256 | Vendored SHA-256 |\n| --- | --- | --- |\n" +
+    rows.map(Row::line).join("\n") +
+    "\n",
   )
   println(
-    "✅ Vendored \{files.length()} WAMR files and \{stubs.length()} translation units into \{destination}",
+    "✅ Vendored \{rows.length()} files and \{stubs.length()} translation units into \{destination}",
   )
   println("native-stub list:")
   for stub in stubs {
@@ -495,12 +808,18 @@ async fn vendor(checkout : String) -> Unit {
 
 ///|
 async fn main {
-  guard @env.args()[1:] is [checkout] else {
-    eprintln("Usage: vendor-wamr.mbtx <wamr-checkout>")
-    @sys.exit(2)
-    return
+  let run = match @env.args()[1:] {
+    ["check"] => check
+    [checkout, simde] => () => vendor(checkout, simde)
+    _ => {
+      eprintln(
+        "Usage: vendor-wamr.mbtx <wamr-checkout> <simde-checkout> | vendor-wamr.mbtx check",
+      )
+      @sys.exit(2)
+      return
+    }
   }
-  vendor(checkout) catch {
+  run() catch {
     VendorError(message) => {
       eprintln("❌ \{message}")
       @sys.exit(1)

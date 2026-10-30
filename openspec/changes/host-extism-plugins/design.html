@@ -255,9 +255,17 @@ and an <code>UPSTREAM.md</code> that records the tag, the commit and the file li
 WAMR's CMake: <code>INTERP=1</code>, <code>FAST_INTERP=1</code>, <code>AOT=0</code>, <code>JIT=0</code>,
 <code>LIBC_BUILTIN=0</code>, <code>LIBC_WASI=0</code> (the sandbox is ours), <code>BULK_MEMORY=1</code>,
 <code>REF_TYPES=1</code>, <code>INSTRUCTION_METERING=1</code>, <code>THREAD_MGR=1</code> (see
-<a href="#eng-4">ENG-4</a>), <code>MULTI_MODULE=0</code> and <code>SIMD</code> as the EXT-2 gate decides. The
-vendored tree keeps WAMR's <code>LICENSE</code> (Apache-2.0 WITH LLVM-exception), and
-<code>pkgs/extism/README.md</code> has a third-party note.</p>
+<a href="#eng-4">ENG-4</a>), <code>MULTI_MODULE=0</code>, <code>SIMD=1</code> and <code>SIMDE=1</code>. The
+vendored tree keeps WAMR's <code>LICENSE</code> (Apache-2.0 WITH LLVM-exception) and <code>ATTRIBUTIONS.md</code>,
+and <code>pkgs/extism/README.md</code> has a third-party note.</p>
+<p><strong>SIMD.</strong> The native engine supports the fixed-width SIMD proposal, as the js engine does, so the
+feature set of both engines is <code>simd</code>. MoonBit guests, for example the portable Morphir MEP extension,
+use <code>v128</code> through <code>moonbitlang/x/crypto</code>, and moonc has no flag to turn it off. WAMR's fast
+interpreter runs SIMD through the SIMDe headers (<code>WASM_ENABLE_SIMDE</code>). The engine vendors the headers
+that <code>simde/wasm/simd128.h</code> includes, from SIMDe <code>v0.8.2</code> (MIT, the version that WAMR's
+CMake fetches), under <code>wamr/simde/</code> with SIMDe's <code>COPYING</code>. Upstream WAMR turns SIMDe off on
+Windows; the third patch below makes the one construct that MSVC does not compile portable, and the Windows MSVC
+run proves the build. A SIMD probe module gives the same lanes on both engines.</p>
 <p>Every host import, the kernel forwarders, the WASI functions and the embedder's functions, is registered with
 <code>wasm_runtime_register_natives_raw</code>. A raw native gets its arguments as an array of 64-bit cells and
 writes its results into the same array, so no <code>invokeNative</code> runs on any platform: no assembler is
@@ -280,9 +288,23 @@ the loop runs <code>CHECK_INSTRUCTION_LIMIT()</code> before each opcode. Reason:
 goto (MSVC) builds the switch dispatch, and upstream calls <code>CHECK_INSTRUCTION_LIMIT</code> only in the
 computed-goto <code>FETCH_OPCODE_AND_DISPATCH</code> macro, so the instruction budget is not enforced there.
 Without the patch, "Runaway loop on native" does not end on Windows MSVC (run 41120275074) and in a build with
-<code>WASM_ENABLE_LABELS_AS_VALUES=0</code>; CI runs the engine tests in that build on Linux. An issue draft for
-upstream is in the implementation pull request.</li>
+<code>WASM_ENABLE_LABELS_AS_VALUES=0</code>; CI runs the engine tests in that build on Linux. Upstream fixed it
+after <code>WAMR-2.4.5</code> in commit <code>ea5dd88e</code> (pull request #5141, issue #5140); the patch goes at
+the next WAMR upgrade.</li>
+<li><code>core/iwasm/interpreter/wasm_interp_fast.c</code>, the SIMDe code: the macro
+<code>SIMD_V128_TO_SIMDE_V128</code> calls a static inline function instead of a GNU statement expression.
+Reason: MSVC does not compile statement expressions, and upstream builds SIMDe on no Windows platform
+(<code>build-scripts/runtime_lib.cmake</code>, at <code>WAMR-2.4.5</code> and at main <code>f8ed1f44</code>).</li>
+<li><code>core/iwasm/interpreter/wasm_runtime.c</code>, function
+<code>execute_post_instantiate_functions</code>: the instantiation does not look up <code>__post_instantiate</code>
+and <code>__wasm_call_ctors</code>; it runs only the wasm start function. Reason: the plugin runs the guest's
+start-up exports itself, as upstream Extism does (<a href="#plg-1">PLG-1</a>), and WAMR ran the constructors a
+second time, with no budget and no deadline. No WAMR setting or API skips these lookups. The test "Constructors
+run once" fails without the patch.</li>
 </ul>
+<p><code>mise run check:wamr</code> compares each vendored file with the SHA-256 that <code>wamr/UPSTREAM.md</code>
+gives for it, after the include rewrite and the patches, and fails on a changed, missing or unlisted file. CI
+runs it in the lint job.</p>
 <p><code>pkgs/extism/engine/wamr/build.zig</code> holds the source list and the defines, the same as the CMake
 selection. It builds and tests WAMR alone with Zig for every CLI platform in CI. It also writes the
 <code>native-stub</code> list and the <code>stub-cc-flags</code> of the engine's <code>moon.pkg</code>; a check
@@ -461,8 +483,9 @@ worker.</td></tr>
 test runs many short calls and checks that no thread is left.</td></tr>
 <tr><td>Zig builds of the kernel differ between hosts or Zig releases</td><td><code>check:kernel</code> runs on
 Linux and macOS; Zig is pinned with finos/morphir-moonbit's pin.</td></tr>
-<tr><td>The Python module needs SIMD or another feature that the fast interpreter build lacks</td><td>GATE-1 records
-the feature error with its name; SIMD is enabled only if the fixture needs it and the gate still passes.</td></tr>
+<tr><td>The Python module needs a feature that the fast interpreter build lacks</td><td>GATE-1 records the
+feature error with its name. SIMD is enabled for MoonBit guests, and the gate runs with it on every
+platform.</td></tr>
 <tr><td>A conformant plugin needs a WASI answer other than an error</td><td>The plugin fails with its own
 diagnostic. Fixture plugins built with upstream PDKs exercise the start-up calls; a new answer needs a reviewed
 change to WASI-1.</td></tr>

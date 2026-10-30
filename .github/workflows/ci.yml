@@ -36,6 +36,8 @@ jobs:
         run: mise run lint
       - name: Validate workspace
         run: mise run validate
+      - name: Check the vendored WAMR and SIMDe files against UPSTREAM.md
+        run: mise run check:wamr
       - name: Validate OpenSpec
         run: mise run openspec:validate
 

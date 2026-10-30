@@ -22,7 +22,19 @@
 #endif
 
 #if WASM_ENABLE_SIMDE != 0
-#include "simde/wasm/simd128.h"
+#include "../../../simde/wasm/simd128.h"
+#endif
+
+#if WASM_ENABLE_SIMDE != 0
+/* moonrockz/extism: a function instead of a GNU statement expression, for MSVC (UPSTREAM.md). */
+static inline simde_v128_t
+extism_simd_v128_to_simde_v128(V128 s_v)
+{
+    simde_v128_t se_v;
+    bh_assert(sizeof(V128) == sizeof(simde_v128_t));
+    bh_memcpy_s(&se_v, sizeof(simde_v128_t), &s_v, sizeof(V128));
+    return se_v;
+}
 #endif
 
 typedef int32 CellType_I32;
@@ -5866,13 +5878,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 goto call_func_from_entry;
             }
 #if WASM_ENABLE_SIMDE != 0
-#define SIMD_V128_TO_SIMDE_V128(s_v)                                    \
-    ({                                                                  \
-        bh_assert(sizeof(V128) == sizeof(simde_v128_t));                \
-        simde_v128_t se_v;                                              \
-        bh_memcpy_s(&se_v, sizeof(simde_v128_t), &(s_v), sizeof(V128)); \
-        se_v;                                                           \
-    })
+#define SIMD_V128_TO_SIMDE_V128(s_v) extism_simd_v128_to_simde_v128(s_v)
 
 #define SIMDE_V128_TO_SIMD_V128(sv, v)                                \
     do {                                                              \

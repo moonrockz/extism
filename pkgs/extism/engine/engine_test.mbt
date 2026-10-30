@@ -347,3 +347,28 @@ test "the memory of an instance is a WASI guest memory" {
     Return(Fault),
   )
 }
+
+///|
+test "SIMD probe: both engines support simd and compute the same lanes" {
+  assert_true(@engine.Engine::default().features().contains(Simd))
+  let instance = compile(@fixtures.simd_probe()).instantiate(
+    @engine.Imports::new(),
+  )
+  assert_eq(instance.call("lanes", [I32(7)]), [I32(21)])
+  assert_eq(instance.call("shuffle_sum", []), [I32(0x0c0d0e0f)])
+  assert_eq(instance.call("float", []), [F64(3.75)])
+  let simple = compile(@fixtures.simd()).instantiate(@engine.Imports::new())
+  assert_eq(simple.call("v", []), [])
+}
+
+///|
+test "Feature that the engine does not support: a shared memory names threads on both engines" {
+  // (module (memory 1 1 shared))
+  let shared = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x04\x01\x03\x01\x01"
+  let error = try @engine.Engine::default().compile(shared) catch {
+    error => error
+  } noraise {
+    _ => fail("the load must fail")
+  }
+  assert_true(error is FeatureUnsupported(Threads))
+}

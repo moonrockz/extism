@@ -1,0 +1,14 @@
+// The engine runs on native and js only.
+supported_targets = "+native+js"
+
+import {
+  "moonrockz/extism/engine",
+  "moonbitlang/core/encoding/utf8",
+}
+
+import {
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/x/fs",
+} for "test"

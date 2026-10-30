@@ -192,7 +192,7 @@ fn ensure_init() -> Unit {
 
 ///|
 fn backend_features() -> Array[Feature] {
-  []
+  [Simd]
 }
 
 ///|
