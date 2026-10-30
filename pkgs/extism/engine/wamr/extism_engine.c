@@ -24,26 +24,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Status codes of extism_wamr_call; engine_native.mbt has the same values. */
+/* Status codes of extism_wamr_call; native.mbt has the same values. */
 enum {
-  STATUS_OK = 0,
-  STATUS_UNKNOWN_EXPORT = 1,
-  STATUS_ARITY = 2,
-  STATUS_TRAP_UNREACHABLE = 10,
-  STATUS_TRAP_MEMORY = 11,
-  STATUS_TRAP_DIVIDE_BY_ZERO = 12,
-  STATUS_TRAP_INTEGER_OVERFLOW = 13,
-  STATUS_TRAP_CONVERSION = 14,
-  STATUS_TRAP_STACK = 15,
-  STATUS_TRAP_INDIRECT_CALL = 16,
-  STATUS_TRAP_HOST = 17,
-  STATUS_TRAP_TABLE = 18,
-  STATUS_TRAP_OTHER = 19,
-  STATUS_BUDGET = 20,
-  STATUS_INTERRUPTED = 21,
+  EXTISM_STATUS_OK = 0,
+  EXTISM_STATUS_UNKNOWN_EXPORT = 1,
+  EXTISM_STATUS_ARITY = 2,
+  EXTISM_STATUS_TRAP_UNREACHABLE = 10,
+  EXTISM_STATUS_TRAP_MEMORY = 11,
+  EXTISM_STATUS_TRAP_DIVIDE_BY_ZERO = 12,
+  EXTISM_STATUS_TRAP_INTEGER_OVERFLOW = 13,
+  EXTISM_STATUS_TRAP_CONVERSION = 14,
+  EXTISM_STATUS_TRAP_STACK = 15,
+  EXTISM_STATUS_TRAP_INDIRECT_CALL = 16,
+  EXTISM_STATUS_TRAP_HOST = 17,
+  EXTISM_STATUS_TRAP_TABLE = 18,
+  EXTISM_STATUS_TRAP_OTHER = 19,
+  EXTISM_STATUS_BUDGET = 20,
+  EXTISM_STATUS_INTERRUPTED = 21,
 };
 
-enum { BINDING_NONE = 0, BINDING_HOST = 1, BINDING_EXPORT = 2 };
+enum { EXTISM_BINDING_NONE = 0, EXTISM_BINDING_HOST = 1, EXTISM_BINDING_EXPORT = 2 };
 
 /* The exception that a failed host function sets on its calling instance. */
 static const char host_failure[] = "moonrockz-extism: host function failed";
@@ -278,7 +278,7 @@ extism_wamr_linker_host(uint64_t linker, int32_t index, int32_t symbol, int32_t 
 {
   InstanceData *data = (InstanceData *)(uintptr_t)linker;
   data->bindings[index].symbol = symbol;
-  data->bindings[index].kind = BINDING_HOST;
+  data->bindings[index].kind = EXTISM_BINDING_HOST;
   data->bindings[index].host_id = host_id;
 }
 
@@ -294,7 +294,7 @@ extism_wamr_linker_export(uint64_t linker, int32_t index, int32_t symbol, Instan
     return 0;
   }
   data->bindings[index].symbol = symbol;
-  data->bindings[index].kind = BINDING_EXPORT;
+  data->bindings[index].kind = EXTISM_BINDING_EXPORT;
   data->bindings[index].target = target->data;
   data->bindings[index].function = function;
   return 1;
@@ -380,43 +380,43 @@ static int32_t
 status_of(const char *exception)
 {
   if (!exception) {
-    return STATUS_TRAP_OTHER;
+    return EXTISM_STATUS_TRAP_OTHER;
   }
   if (strstr(exception, "terminated by user")) {
-    return STATUS_INTERRUPTED;
+    return EXTISM_STATUS_INTERRUPTED;
   }
   if (strstr(exception, "instruction limit exceeded")) {
-    return STATUS_BUDGET;
+    return EXTISM_STATUS_BUDGET;
   }
   if (strstr(exception, host_failure)) {
-    return STATUS_TRAP_HOST;
+    return EXTISM_STATUS_TRAP_HOST;
   }
   if (strstr(exception, "unreachable")) {
-    return STATUS_TRAP_UNREACHABLE;
+    return EXTISM_STATUS_TRAP_UNREACHABLE;
   }
   if (strstr(exception, "out of bounds memory access")) {
-    return STATUS_TRAP_MEMORY;
+    return EXTISM_STATUS_TRAP_MEMORY;
   }
   if (strstr(exception, "integer divide by zero")) {
-    return STATUS_TRAP_DIVIDE_BY_ZERO;
+    return EXTISM_STATUS_TRAP_DIVIDE_BY_ZERO;
   }
   if (strstr(exception, "integer overflow")) {
-    return STATUS_TRAP_INTEGER_OVERFLOW;
+    return EXTISM_STATUS_TRAP_INTEGER_OVERFLOW;
   }
   if (strstr(exception, "invalid conversion to integer")) {
-    return STATUS_TRAP_CONVERSION;
+    return EXTISM_STATUS_TRAP_CONVERSION;
   }
   if (strstr(exception, "stack overflow")) {
-    return STATUS_TRAP_STACK;
+    return EXTISM_STATUS_TRAP_STACK;
   }
   if (strstr(exception, "indirect call") || strstr(exception, "undefined element")
       || strstr(exception, "uninitialized element") || strstr(exception, "invalid function index")) {
-    return STATUS_TRAP_INDIRECT_CALL;
+    return EXTISM_STATUS_TRAP_INDIRECT_CALL;
   }
   if (strstr(exception, "out of bounds table access")) {
-    return STATUS_TRAP_TABLE;
+    return EXTISM_STATUS_TRAP_TABLE;
   }
-  return STATUS_TRAP_OTHER;
+  return EXTISM_STATUS_TRAP_OTHER;
 }
 
 /* Calls `function` of `data` with one 64-bit cell per parameter and writes the results into the
@@ -429,7 +429,7 @@ call_cells(InstanceData *data, wasm_exec_env_t env, wasm_function_inst_t functio
   wasm_valkind_t param_types[16];
   wasm_valkind_t result_types[16];
   if (params > 16 || results > 16) {
-    return STATUS_ARITY;
+    return EXTISM_STATUS_ARITY;
   }
   wasm_func_get_param_types(function, data->instance, param_types);
   wasm_func_get_result_types(function, data->instance, result_types);
@@ -457,7 +457,7 @@ call_cells(InstanceData *data, wasm_exec_env_t env, wasm_function_inst_t functio
       cells[i] = argv[at++];
     }
   }
-  return STATUS_OK;
+  return EXTISM_STATUS_OK;
 }
 
 static void
@@ -468,7 +468,7 @@ trampoline(wasm_exec_env_t env, uint64_t *args)
   int32_t symbol = (int32_t)(intptr_t)wasm_runtime_get_function_attachment(env);
   Binding *binding = NULL;
   for (int32_t i = 0; data && i < data->count; i++) {
-    if (data->bindings[i].symbol == symbol && data->bindings[i].kind != BINDING_NONE) {
+    if (data->bindings[i].symbol == symbol && data->bindings[i].kind != EXTISM_BINDING_NONE) {
       binding = &data->bindings[i];
       break;
     }
@@ -477,7 +477,7 @@ trampoline(wasm_exec_env_t env, uint64_t *args)
     wasm_runtime_set_exception(instance, "failed to call unlinked import function");
     return;
   }
-  if (binding->kind == BINDING_HOST) {
+  if (binding->kind == EXTISM_BINDING_HOST) {
     if (!host_callback || host_callback(binding->host_id, (uint64_t)(uintptr_t)args) != 0) {
       data->host_failed = 1;
       wasm_runtime_set_exception(instance, host_failure);
@@ -486,7 +486,7 @@ trampoline(wasm_exec_env_t env, uint64_t *args)
   }
   InstanceData *target = binding->target;
   int32_t status = call_cells(target, target->env, binding->function, args);
-  if (status != STATUS_OK) {
+  if (status != EXTISM_STATUS_OK) {
     const char *exception = wasm_runtime_get_exception(target->instance);
     wasm_runtime_set_exception(instance, exception ? exception : "trap in a linked instance");
     wasm_runtime_clear_exception(target->instance);
@@ -539,7 +539,7 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
   wasm_function_inst_t function = wasm_runtime_lookup_function(data->instance, text);
   free(text);
   if (!function) {
-    return STATUS_UNKNOWN_EXPORT;
+    return EXTISM_STATUS_UNKNOWN_EXPORT;
   }
   data->host_failed = 0;
   wasm_runtime_set_instruction_count_limit(data->env, budget > 0 ? budget : -1);
@@ -577,8 +577,8 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
     os_mutex_destroy(&watchdog.lock);
     live_watchdogs--;
   }
-  if (status != STATUS_OK && data->host_failed) {
-    status = STATUS_TRAP_HOST;
+  if (status != EXTISM_STATUS_OK && data->host_failed) {
+    status = EXTISM_STATUS_TRAP_HOST;
   }
   return status;
 }

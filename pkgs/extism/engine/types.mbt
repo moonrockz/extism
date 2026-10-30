@@ -335,7 +335,7 @@ pub extend CallError with @debug.Debug::{to_repr}
 
 ///|
 /// A guest memory access that is outside the memory: the offset and the length.
-pub suberror MemoryError {
+pub(all) suberror MemoryError {
   OutOfBounds(Int64, Int32)
 } derive(Eq, Debug)
 

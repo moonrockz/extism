@@ -1,11 +1,229 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "moonrockz/extism"
 
+import {
+  "moonbitlang/core/debug",
+  "moonrockz/extism/engine",
+  "moonrockz/extism/wasi",
+}
+
 // Values
+pub let logging_off : Int32
 
 // Errors
+pub(all) suberror CallError {
+  Plugin(Int32, String)
+  Exit(Int32)
+  Denied(DeniedCall)
+  HostFunction(String, String)
+  MemoryLimit(MemoryKind)
+  Limit(String)
+  Engine(@engine.CallError)
+  Initialization(@engine.CallError)
+  UnknownExport(String)
+} derive(@debug.Debug)
+pub fn CallError::to_repr(Self) -> @debug.Repr
+
+pub(all) suberror LoadError {
+  UnlinkedImport(String, String)
+  WrongSignature(String, String)
+  Engine(@engine.EngineError)
+} derive(@debug.Debug)
+pub fn LoadError::to_repr(Self) -> @debug.Repr
+
+pub(all) suberror ManifestError {
+  ReservedName(String)
+  AlreadyRegistered(String)
+} derive(Eq, @debug.Debug)
+pub fn ManifestError::equal(Self, Self) -> Bool
+pub fn ManifestError::not_equal(Self, Self) -> Bool
+pub fn ManifestError::to_repr(Self) -> @debug.Repr
+
+pub(all) suberror NameError {
+  NameError(String, String, String)
+} derive(Eq, @debug.Debug)
+pub fn NameError::equal(Self, Self) -> Bool
+pub fn NameError::not_equal(Self, Self) -> Bool
+pub fn NameError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+pub struct ByteLimit {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn ByteLimit::bytes(Self) -> Int32
+pub fn ByteLimit::equal(Self, Self) -> Bool
+pub fn ByteLimit::not_equal(Self, Self) -> Bool
+pub fn ByteLimit::parse(Int64) -> Self raise NameError
+pub fn ByteLimit::to_repr(Self) -> @debug.Repr
+
+pub struct CallContext {
+  // private fields
+}
+pub fn CallContext::allocate(Self, BytesView) -> Handle raise @engine.MemoryError
+pub fn CallContext::read(Self, Handle) -> Bytes raise @engine.MemoryError
+
+pub(all) enum ConfigPolicy {
+  Deny
+  Empty
+  Values(Map[String, String])
+}
+
+pub(all) struct DeniedCall {
+  function : String
+  method_ : String?
+  url : String?
+} derive(Eq, @debug.Debug)
+pub fn DeniedCall::equal(Self, Self) -> Bool
+pub fn DeniedCall::not_equal(Self, Self) -> Bool
+pub fn DeniedCall::to_repr(Self) -> @debug.Repr
+
+pub struct ExportName {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn ExportName::equal(Self, Self) -> Bool
+pub fn ExportName::not_equal(Self, Self) -> Bool
+pub fn ExportName::parse(String) -> Self raise NameError
+pub fn ExportName::text(Self) -> String
+pub fn ExportName::to_repr(Self) -> @debug.Repr
+
+pub(all) enum ExtismFunction {
+  ConfigGet
+  VarGet
+  VarSet
+  LogTrace
+  LogDebug
+  LogInfo
+  LogWarn
+  LogError
+  GetLogLevel
+  HttpRequest
+  HttpStatusCode
+  HttpHeaders
+} derive(Eq, @debug.Debug)
+pub fn ExtismFunction::all() -> Array[Self]
+pub fn ExtismFunction::equal(Self, Self) -> Bool
+pub fn ExtismFunction::from_name(StringView) -> Self?
+pub fn ExtismFunction::name(Self) -> String
+pub fn ExtismFunction::not_equal(Self, Self) -> Bool
+pub fn ExtismFunction::signature(Self) -> @engine.Signature
+pub fn ExtismFunction::to_repr(Self) -> @debug.Repr
+
+pub struct FunctionName {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn FunctionName::equal(Self, Self) -> Bool
+pub fn FunctionName::not_equal(Self, Self) -> Bool
+pub fn FunctionName::parse(String) -> Self raise NameError
+pub fn FunctionName::text(Self) -> String
+pub fn FunctionName::to_repr(Self) -> @debug.Repr
+
+pub struct Handle {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn Handle::equal(Self, Self) -> Bool
+pub fn Handle::not_equal(Self, Self) -> Bool
+pub fn Handle::offset(Self) -> Int64
+pub fn Handle::parse(Int64) -> Self raise NameError
+pub fn Handle::to_repr(Self) -> @debug.Repr
+
+pub struct HostFunction {
+  // private fields
+}
+pub fn HostFunction::label(Self) -> String
+pub fn HostFunction::new(Namespace, FunctionName, @engine.Signature, (CallContext, Array[@engine.Value]) -> Array[@engine.Value] raise @engine.HostError) -> Self
+
+pub(all) enum HttpPolicy {
+  Deny
+  Handler((HttpRequest) -> HttpResponse raise @engine.HostError)
+}
+
+pub(all) struct HttpRequest {
+  method_ : String
+  url : String
+  headers : Map[String, String]
+  body : Bytes
+}
+
+pub(all) struct HttpResponse {
+  status : Int32
+  headers : Map[String, String]
+  body : Bytes
+}
+
+pub struct Limits {
+  // private fields
+}
+pub fn Limits::budget(Self, @engine.Budget) -> Self
+pub fn Limits::deadline(Self, @engine.Deadline) -> Self
+pub fn Limits::default() -> Self
+pub fn Limits::kernel_memory(Self, @engine.PageCount) -> Self
+pub fn Limits::plugin_memory(Self, @engine.PageCount) -> Self
+
+pub(all) enum LogLevel {
+  Trace
+  Debug
+  Info
+  Warn
+  Error
+} derive(Eq, @debug.Debug)
+pub fn LogLevel::code(Self) -> Int32
+pub fn LogLevel::equal(Self, Self) -> Bool
+pub fn LogLevel::not_equal(Self, Self) -> Bool
+pub fn LogLevel::to_repr(Self) -> @debug.Repr
+
+pub(all) enum LogPolicy {
+  Discard
+  Sink(LogLevel, (LogLevel, String) -> Unit)
+}
+
+pub struct Manifest {
+  // private fields
+}
+pub fn Manifest::limits(Self, Limits) -> Self
+pub fn Manifest::new(Bytes) -> Self
+pub fn Manifest::policy(Self, Policy) -> Self
+pub fn Manifest::register(Self, HostFunction) -> Self raise ManifestError
+pub fn Manifest::wasi(Self, @wasi.Sandbox) -> Self
+
+pub(all) enum MemoryKind {
+  PluginMemory
+  KernelMemory
+} derive(Eq, @debug.Debug)
+pub fn MemoryKind::equal(Self, Self) -> Bool
+pub fn MemoryKind::not_equal(Self, Self) -> Bool
+pub fn MemoryKind::to_repr(Self) -> @debug.Repr
+
+pub struct Namespace {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn Namespace::equal(Self, Self) -> Bool
+pub fn Namespace::not_equal(Self, Self) -> Bool
+pub fn Namespace::parse(String) -> Self raise NameError
+pub fn Namespace::text(Self) -> String
+pub fn Namespace::to_repr(Self) -> @debug.Repr
+
+pub struct Plugin {
+  // private fields
+}
+pub fn Plugin::bounds(Self) -> @engine.Bounds
+pub fn Plugin::call(Self, ExportName, BytesView) -> Bytes raise CallError
+pub fn Plugin::has_function(Self, ExportName) -> Bool
+pub fn Plugin::load(Manifest, engine? : @engine.Engine) -> Self raise LoadError
+
+pub struct Policy {
+  // private fields
+}
+pub fn Policy::config(Self, ConfigPolicy) -> Self
+pub fn Policy::default() -> Self
+pub fn Policy::http(Self, HttpPolicy) -> Self
+pub fn Policy::logging(Self, LogPolicy) -> Self
+pub fn Policy::variables(Self, VariablePolicy) -> Self
+
+pub(all) enum VariablePolicy {
+  Deny
+  Empty
+  Session(ByteLimit)
+}
 
 // Type aliases
 

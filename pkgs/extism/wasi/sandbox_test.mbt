@@ -215,12 +215,25 @@ test "Write to stdin: ENOTCAPABLE" {
 
 ///|
 test "Plugin that imports an unusual function: path_symlink returns an error code" {
+  // The fd of path_symlink is its third argument.
   assert_eq(
     call(@wasi.Sandbox::new(), PathSymlink, plain(), [0, 0, 3, 0, 0]),
-    Return(Notcapable),
+    Return(Badf),
   )
   assert_eq(
-    call(@wasi.Sandbox::new(), PathSymlink, plain(), [0, 0, 7, 0, 0]),
+    call(@wasi.Sandbox::new(), PathSymlink, plain(), [0, 0, 1, 0, 0]),
+    Return(Notcapable),
+  )
+}
+
+///|
+test "path_link and path_rename check both of their fds" {
+  assert_eq(
+    call(@wasi.Sandbox::new(), PathLink, plain(), [1, 0, 0, 0, 5, 0, 0]),
+    Return(Badf),
+  )
+  assert_eq(
+    call(@wasi.Sandbox::new(), PathRename, plain(), [1, 0, 0, 2, 0, 0]),
     Return(Notcapable),
   )
 }

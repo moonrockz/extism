@@ -133,11 +133,22 @@ let right_fd_read : UInt64 = 1UL << 1
 let right_fd_write : UInt64 = 1UL << 6
 
 ///|
-/// Whether a function takes an fd as its first argument.
-fn takes_fd(function : Function) -> Bool {
-  function.name().has_prefix("fd_") ||
-  function.name().has_prefix("path_") ||
-  function.name().has_prefix("sock_")
+/// The indices of the fd arguments of a function, in its core signature.
+fn fd_arguments(function : Function) -> Array[Int32] {
+  match function {
+    FdRenumber => [0, 1]
+    PathSymlink => [2]
+    PathLink => [0, 4]
+    PathRename => [0, 3]
+    _ =>
+      if function.name().has_prefix("fd_") ||
+        function.name().has_prefix("path_") ||
+        function.name().has_prefix("sock_") {
+        [0]
+      } else {
+        []
+      }
+  }
 }
 
 ///|
@@ -164,10 +175,8 @@ pub fn[M : GuestMemory] Sandbox::call(
     return Return(Inval)
   }
   let arg = (i : Int32) => unsigned(args[i])
-  if takes_fd(function) {
-    if !standard(arg(0)) || (function is FdRenumber && !standard(arg(1))) {
-      return Return(Badf)
-    }
+  if fd_arguments(function).iter().any(i => !standard(arg(i))) {
+    return Return(Badf)
   }
   let errno = self.answer(function, memory, arg) catch {
     OutOfBounds(_, _) => Fault

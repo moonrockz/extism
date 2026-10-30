@@ -6,17 +6,27 @@ pub fn add() -> Bytes
 
 pub fn big() -> Bytes
 
+pub fn fd_write_import() -> Bytes
+
 pub fn features() -> Bytes
 
 pub fn grow() -> Bytes
 
 pub fn host() -> Bytes
 
+pub fn init_trap() -> Bytes
+
 pub fn link() -> Bytes
+
+pub fn plugin() -> Bytes
 
 pub fn simd() -> Bytes
 
 pub fn traps() -> Bytes
+
+pub fn unknown_import() -> Bytes
+
+pub fn wasi_plugin() -> Bytes
 
 // Errors
 

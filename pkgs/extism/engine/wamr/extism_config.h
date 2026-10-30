@@ -66,6 +66,9 @@
 #define BH_MALLOC wasm_runtime_malloc
 #define BH_FREE wasm_runtime_free
 
+/* The engine links WAMR statically into the consumer, so its API has no DLL import or export. */
+#define WASM_RUNTIME_API_EXTERN
+
 /* The platform and the architecture. */
 #if defined(__APPLE__)
 #define BH_PLATFORM_DARWIN 1
