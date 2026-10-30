@@ -20,7 +20,7 @@ land before group 1.
 
 ## 2. Engine layer and the EXT-2 gate (morphir-ukvn.5.64.36.4, task 4.4)
 
-- [ ] 2.1 Spike: vendor the WAMR `WAMR-2.4.5` fast-interpreter source with its `LICENSE` (Apache-2.0 WITH
+- [x] 2.1 Spike: vendor the WAMR `WAMR-2.4.5` fast-interpreter source with its `LICENSE` (Apache-2.0 WITH
   LLVM-exception) and `UPSTREAM.md`, add a third-party note to `pkgs/extism/README.md`, add `build.zig` and the
   generated `native-stub` list (ENG-2) with `THREAD_MGR=1` and no `invokeNative` source, and build an empty engine
   package from a fresh consumer module on Linux x64, Linux arm64, macOS arm64 and Windows x64 with MSVC; verify
