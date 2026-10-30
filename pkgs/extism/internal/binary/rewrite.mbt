@@ -61,7 +61,7 @@ fn append_entries(
   match module_.sections.iter().find_first(s => s.id == id) {
     Some(section) => {
       let reader = Reader::new(module_.bytes, section.start, section.end)
-      let count = reader.u32()
+      let count = reader.count()
       write_vec_header(out, count + extra.length())
       out.write_bytes(module_.bytes[reader.at:section.end].to_owned())
     }
@@ -99,7 +99,7 @@ pub fn Module::for_js(
   if self.sections.iter().find_first(s => s.id == 5) is Some(section) {
     let out = @buffer.Buffer()
     let reader = Reader::new(self.bytes, section.start, section.end)
-    let count = reader.u32()
+    let count = reader.count()
     write_vec_header(out, count)
     for index in 0..<count {
       let limits = reader.limits([])

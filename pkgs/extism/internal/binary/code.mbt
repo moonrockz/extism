@@ -14,7 +14,7 @@ fn Scan::new() -> Scan {
 
 ///|
 fn Reader::block_type(self : Reader, scan : Scan) -> Unit raise DecodeError {
-  let code = self.bytes[self.at].to_int()
+  let code = self.peek()
   if code == 0x40 ||
     (code >= 0x7b && code <= 0x7f) ||
     code == 0x70 ||
@@ -61,7 +61,7 @@ fn Reader::instruction(
     }
     0x0c | 0x0d => self.u32() |> ignore
     0x0e => {
-      for _ in 0..<self.u32() {
+      for _ in 0..<self.count() {
         self.u32() |> ignore
       }
       self.u32() |> ignore
@@ -80,7 +80,7 @@ fn Reader::instruction(
       return false
     }
     0x1c =>
-      for _ in 0..<self.u32() {
+      for _ in 0..<self.count() {
         let code = self.byte()
         if code == 0x7b {
           add_feature(scan.features, Simd)
@@ -105,7 +105,7 @@ fn Reader::instruction(
     0x44 => self.skip(8)
     _ if opcode >= 0x45 && opcode <= 0xc4 => ()
     0xd0 => {
-      let code = self.bytes[self.at].to_int()
+      let code = self.peek()
       if code == 0x70 || code == 0x6f {
         self.at += 1
       } else {
@@ -163,7 +163,7 @@ fn Reader::instruction(
 ///|
 /// Reads the locals and instructions of one function body.
 fn Reader::body(self : Reader, scan : Scan) -> Unit raise DecodeError {
-  for _ in 0..<self.u32() {
+  for _ in 0..<self.count() {
     self.u32() |> ignore
     self.val_type(scan.features) |> ignore
   }

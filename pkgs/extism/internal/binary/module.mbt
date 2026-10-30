@@ -224,8 +224,8 @@ fn Reader::func_type(
   self : Reader,
   features : Array[Feature],
 ) -> FuncType raise DecodeError {
-  let params = Array::makei(self.u32(), _ => self.val_type(features))
-  let results = Array::makei(self.u32(), _ => self.val_type(features))
+  let params = Array::makei(self.count(), _ => self.val_type(features))
+  let results = Array::makei(self.count(), _ => self.val_type(features))
   { params, results, }
 }
 
@@ -267,7 +267,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
     let section = Reader::new(bytes, start, start + size)
     match id {
       1 =>
-        for _ in 0..<section.u32() {
+        for _ in 0..<section.count() {
           let form = section.byte()
           guard form == 0x60 else {
             // A recursive or sub type of the GC proposal.
@@ -277,7 +277,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
           types.push(section.func_type(features))
         }
       2 =>
-        for _ in 0..<section.u32() {
+        for _ in 0..<section.count() {
           let module_ = section.name()
           let name = section.name()
           let type_ = match section.byte() {
@@ -312,20 +312,20 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
           imports.push({ module_, name, type_, })
         }
       3 =>
-        for _ in 0..<section.u32() {
+        for _ in 0..<section.count() {
           functions.push(section.u32())
         }
       4 =>
-        for _ in 0..<section.u32() {
+        for _ in 0..<section.count() {
           section.val_type(features) |> ignore
           section.limits(features) |> ignore
         }
       5 =>
-        for _ in 0..<section.u32() {
+        for _ in 0..<section.count() {
           memories.push(section.limits(features))
         }
       6 => {
-        let count = section.u32()
+        let count = section.count()
         global_count = count
         for _ in 0..<count {
           section.val_type(features) |> ignore
@@ -334,7 +334,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
         }
       }
       7 =>
-        for _ in 0..<section.u32() {
+        for _ in 0..<section.count() {
           let name = section.name()
           let kind : ExportKind = match section.byte() {
             0x00 => Func
@@ -347,7 +347,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
           exports.push({ name, kind, index: section.u32(), })
         }
       10 =>
-        for _ in 0..<section.u32() {
+        for _ in 0..<section.count() {
           let body_size = section.u32()
           let body_start = section.at
           section.skip(body_size)

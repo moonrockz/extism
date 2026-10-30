@@ -112,3 +112,79 @@ fn refused(read : () -> @binary.Module raise @binary.DecodeError) -> Bool {
     _ => false
   }
 }
+
+///|
+/// Reads `bytes` as the engines do: the parse, the global scan and both rewrites. A refusal is a
+/// `DecodeError`; any other end of the test (a panic) fails it.
+fn read_all(bytes : Bytes) -> Unit {
+  let module_ = @binary.Module::parse(bytes) catch { DecodeError(_, _) => return }
+  (module_.uses_globals() |> ignore) catch {
+    DecodeError(_, _) => ()
+  }
+  (module_.for_js(256) |> ignore) catch {
+    DecodeError(_, _) => ()
+  }
+}
+
+///|
+let fuzz_fixtures : Array[Bytes] = [
+  @fixtures.add(),
+  @fixtures.big(),
+  @fixtures.fd_write_import(),
+  @fixtures.features(),
+  @fixtures.grow(),
+  @fixtures.host(),
+  @fixtures.init_trap(),
+  @fixtures.link(),
+  @fixtures.plugin(),
+  @fixtures.simd(),
+  @fixtures.simd_probe(),
+  @fixtures.traps(),
+  @fixtures.unknown_import(),
+  @fixtures.wasi_plugin(),
+]
+
+///|
+test "Parser fuzz: every truncation of every fixture is refused or read, never a panic" {
+  for bytes in fuzz_fixtures {
+    for length in 0..=bytes.length() {
+      read_all(bytes[0:length].to_owned())
+    }
+  }
+}
+
+///|
+test "Parser fuzz: changed bytes are refused or read, never a panic" {
+  // A fixed linear congruential generator, so that each run reads the same inputs.
+  let mut state = 0x2545f491UL
+  let next = (bound : Int) => {
+    state = state * 6364136223846793005UL + 1442695040888963407UL
+    ((state >> 33).to_int() & 0x7fffffff) % bound
+  }
+  for bytes in fuzz_fixtures {
+    for _ in 0..<300 {
+      let copy = Array::makei(bytes.length(), i => bytes[i])
+      for _ in 0..<(1 + next(4)) {
+        copy[8 + next(bytes.length() - 8)] = next(256).to_byte()
+      }
+      read_all(Bytes::from_array(copy))
+    }
+  }
+}
+
+///|
+test "Truncated body: an instruction at the end of the bytes is a decode error" {
+  // A module whose only body ends after `ref.null`, `block` or `if` with no immediate.
+  for opcode in [b'\xd0', b'\x02', b'\x04'] {
+    let bytes = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x0a\x04\x01\x02\x00" +
+      Bytes::make(1, opcode)
+    assert_true(refused(() => @binary.Module::parse(bytes)))
+  }
+}
+
+///|
+test "A vector count larger than the bytes left is a decode error, with no large allocation" {
+  // A type section that claims 2^32 - 1 parameters.
+  let bytes = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x07\x01\x60\xff\xff\xff\xff\x0f"
+  assert_true(refused(() => @binary.Module::parse(bytes)))
+}

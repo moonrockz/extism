@@ -38,6 +38,26 @@ fn Reader::byte(self : Reader) -> Int32 raise DecodeError {
 }
 
 ///|
+/// The next byte, which the reader does not pass.
+fn Reader::peek(self : Reader) -> Int32 raise DecodeError {
+  guard self.at < self.end else {
+    raise self.fail("unexpected end of the bytes")
+  }
+  self.bytes[self.at].to_int()
+}
+
+///|
+/// The element count of a vector. Each element takes at least one byte, so a count larger than the
+/// bytes left is refused before anything is allocated for it.
+fn Reader::count(self : Reader) -> Int32 raise DecodeError {
+  let count = self.u32()
+  guard count >= 0 && count <= self.end - self.at else {
+    raise self.fail("vector count \{count} is larger than the bytes left")
+  }
+  count
+}
+
+///|
 /// An unsigned LEB128 number of at most `bits` bits.
 fn Reader::unsigned(
   self : Reader,
