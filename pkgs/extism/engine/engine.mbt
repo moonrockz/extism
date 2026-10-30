@@ -429,3 +429,23 @@ pub fn Memory::write(
   }
   backend_memory_write(self.instance.handle, offset, bytes)
 }
+
+///|
+/// The memory of an instance is the guest memory of the WASI sandbox, on native and on js alike.
+pub impl @wasi.GuestMemory for Memory with fn size(self) {
+  Memory::size(self)
+}
+
+///|
+pub impl @wasi.GuestMemory for Memory with fn read(self, offset, length) {
+  Memory::read(self, offset, length) catch {
+    OutOfBounds(at, count) => raise @wasi.OutOfBounds(at, count)
+  }
+}
+
+///|
+pub impl @wasi.GuestMemory for Memory with fn write(self, offset, bytes) {
+  Memory::write(self, offset, bytes) catch {
+    OutOfBounds(at, count) => raise @wasi.OutOfBounds(at, count)
+  }
+}

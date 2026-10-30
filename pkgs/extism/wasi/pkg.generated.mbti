@@ -1,12 +1,137 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "moonrockz/extism/wasi"
 
+import {
+  "moonbitlang/core/debug",
+}
+
 // Values
+pub let import_namespace : String
 
 // Errors
+pub(all) suberror GuestMemoryError {
+  OutOfBounds(Int64, Int32)
+} derive(Eq, @debug.Debug)
+pub fn GuestMemoryError::equal(Self, Self) -> Bool
+pub fn GuestMemoryError::not_equal(Self, Self) -> Bool
+pub fn GuestMemoryError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+pub(all) struct Clock {
+  time : (ClockId) -> UInt64
+  resolution : (ClockId) -> UInt64
+}
+
+pub(all) enum ClockId {
+  Realtime
+  Monotonic
+  ProcessCputime
+  ThreadCputime
+} derive(Eq, @debug.Debug)
+pub fn ClockId::equal(Self, Self) -> Bool
+pub fn ClockId::not_equal(Self, Self) -> Bool
+pub fn ClockId::to_repr(Self) -> @debug.Repr
+
+pub(all) enum Errno {
+  Success
+  Badf
+  Fault
+  Inval
+  Notcapable
+} derive(Eq, @debug.Debug)
+pub fn Errno::code(Self) -> Int32
+pub fn Errno::equal(Self, Self) -> Bool
+pub fn Errno::not_equal(Self, Self) -> Bool
+pub fn Errno::to_repr(Self) -> @debug.Repr
+
+pub(all) enum Function {
+  ArgsGet
+  ArgsSizesGet
+  EnvironGet
+  EnvironSizesGet
+  ClockResGet
+  ClockTimeGet
+  FdAdvise
+  FdAllocate
+  FdClose
+  FdDatasync
+  FdFdstatGet
+  FdFdstatSetFlags
+  FdFdstatSetRights
+  FdFilestatGet
+  FdFilestatSetSize
+  FdFilestatSetTimes
+  FdPread
+  FdPrestatGet
+  FdPrestatDirName
+  FdPwrite
+  FdRead
+  FdReaddir
+  FdRenumber
+  FdSeek
+  FdSync
+  FdTell
+  FdWrite
+  PathCreateDirectory
+  PathFilestatGet
+  PathFilestatSetTimes
+  PathLink
+  PathOpen
+  PathReadlink
+  PathRemoveDirectory
+  PathRename
+  PathSymlink
+  PathUnlinkFile
+  PollOneoff
+  ProcExit
+  ProcRaise
+  SchedYield
+  RandomGet
+  SockAccept
+  SockRecv
+  SockSend
+  SockShutdown
+} derive(Eq, @debug.Debug)
+pub fn Function::all() -> Array[Self]
+pub fn Function::equal(Self, Self) -> Bool
+pub fn Function::from_name(StringView) -> Self?
+pub fn Function::name(Self) -> String
+pub fn Function::not_equal(Self, Self) -> Bool
+pub fn Function::params(Self) -> Array[WasiType]
+pub fn Function::results(Self) -> Array[WasiType]
+pub fn Function::to_repr(Self) -> @debug.Repr
+
+pub(all) enum Outcome {
+  Return(Errno)
+  Exit(Int32)
+} derive(Eq, @debug.Debug)
+pub fn Outcome::equal(Self, Self) -> Bool
+pub fn Outcome::not_equal(Self, Self) -> Bool
+pub fn Outcome::to_repr(Self) -> @debug.Repr
+
+pub struct Sandbox {
+  // private fields
+}
+pub fn[M : GuestMemory] Sandbox::call(Self, Function, M, Array[Int64]) -> Outcome
+pub fn Sandbox::clock(Self, Clock) -> Self
+pub fn Sandbox::new() -> Self
+pub fn Sandbox::random(Self, (Int32) -> Bytes) -> Self
+pub fn Sandbox::stderr(Self, (BytesView) -> Unit) -> Self
+pub fn Sandbox::stdout(Self, (BytesView) -> Unit) -> Self
+
+pub(all) enum WasiType {
+  I32
+  I64
+} derive(Eq, @debug.Debug)
+pub fn WasiType::equal(Self, Self) -> Bool
+pub fn WasiType::not_equal(Self, Self) -> Bool
+pub fn WasiType::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 
 // Traits
+pub(open) trait GuestMemory {
+  fn size(Self) -> Int64
+  fn read(Self, Int64, Int32) -> Bytes raise GuestMemoryError
+  fn write(Self, Int64, BytesView) -> Unit raise GuestMemoryError
+}

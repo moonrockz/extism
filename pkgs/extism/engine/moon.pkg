@@ -9,6 +9,7 @@ warnings = "-29"
 
 import {
   "moonrockz/extism/internal/binary",
+  "moonrockz/extism/wasi",
   "moonbitlang/core/cmp",
   "moonbitlang/core/debug",
   "moonbitlang/core/encoding/utf8",

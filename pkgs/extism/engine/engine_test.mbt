@@ -334,3 +334,16 @@ test "signatures print as WAT writes them" {
   assert_eq(i64_pair.to_string(), "(i64, i64) -> i64")
   assert_eq(@engine.Signature::new([], []).to_string(), "() -> ()")
 }
+
+///|
+test "the memory of an instance is a WASI guest memory" {
+  let instance = kernel()
+  guard instance.memory() is Some(memory) else { fail("no memory") }
+  let sandbox = @wasi.Sandbox::new()
+  assert_eq(sandbox.call(ArgsSizesGet, memory, [70000, 70004]), Return(Success))
+  assert_eq(memory.read(70000, 8), Bytes::make(8, b'\x00'))
+  assert_eq(
+    sandbox.call(ArgsSizesGet, memory, [memory.size() - 2L, 0]),
+    Return(Fault),
+  )
+}

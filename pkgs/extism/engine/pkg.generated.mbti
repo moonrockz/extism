@@ -3,6 +3,7 @@ package "moonrockz/extism/engine"
 
 import {
   "moonbitlang/core/debug",
+  "moonrockz/extism/wasi",
 }
 
 // Values
@@ -169,6 +170,7 @@ pub struct Memory {
 pub fn Memory::read(Self, Int64, Int32) -> Bytes raise MemoryError
 pub fn Memory::size(Self) -> Int64
 pub fn Memory::write(Self, Int64, BytesView) -> Unit raise MemoryError
+pub impl @wasi.GuestMemory for Memory
 
 pub struct Module {
   // private fields

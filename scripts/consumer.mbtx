@@ -98,7 +98,8 @@ async fn main {
   let args = @env.args()[1:]
   let targets = if args.is_empty() { all_targets } else { args.to_array() }
   try {
-    let root = @fs.realpath(".")
+    // A moon.work string takes forward slashes on every platform.
+    let root = @fs.realpath(".").replace_all(old="\\", new="/")
     for target in targets {
       check(root, target)
     }
