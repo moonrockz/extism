@@ -307,6 +307,9 @@ pub extend EngineError with @debug.Debug::{to_repr}
 /// The error of a host function, with its message.
 pub(all) suberror HostError {
   HostError(String)
+  /// The host function ends the guest's call with an exit code, as WASI `proc_exit` does. After code 0
+  /// the instance takes more calls, as upstream Extism; after another code it takes no more.
+  Exit(Int)
 } derive(Eq, Debug)
 
 ///|

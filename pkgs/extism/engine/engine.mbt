@@ -322,7 +322,8 @@ fn check_arguments(
 /// Calls the exported function `name` with `args`. With a budget, the call stops with
 /// `BudgetExhausted` when it runs more instructions; with a deadline, it stops with `Interrupted`
 /// when the deadline passes, where the engine enforces these bounds. After a trap, an exhausted
-/// budget, an interruption, a memory limit or a host error the instance takes no more calls.
+/// budget, an interruption, a memory limit or a host error the instance takes no more calls; a host
+/// function's `Exit(0)` ends the call and leaves the instance usable.
 pub fn Instance::call(
   self : Instance,
   name : String,
@@ -356,9 +357,6 @@ fn Instance::invoke(
 ) -> Array[Value] raise CallError {
   // A refusal before this call stays recorded for `take_refused_grow`; this call reads its own.
   self.refused = self.refused || backend_take_refused_grow(self.handle)
-  errdefer {
-    self.usable = false
-  }
   let results = backend_call(
     self.handle,
     name,
@@ -369,9 +367,14 @@ fn Instance::invoke(
   ) catch {
     Host(error) => {
       self.refused = self.refused || backend_take_refused_grow(self.handle)
+      // A clean exit ends the call and leaves the instance usable.
+      if !(error is Exit(0)) {
+        self.usable = false
+      }
       raise Host(error)
     }
     error => {
+      self.usable = false
       let refused = backend_take_refused_grow(self.handle)
       self.refused = self.refused || refused
       raise if refused { MemoryLimit } else { error }

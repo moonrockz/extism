@@ -849,6 +849,9 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
   if (data->host_failed) {
     status = EXTISM_STATUS_TRAP_HOST;
   }
+  /* The status holds the error. WAMR does not clear an exception when a call starts, and the instance
+     can take more calls after a clean exit of the guest (a host function's exit with code 0). */
+  wasm_runtime_clear_exception(data->instance);
   return status;
 }
 

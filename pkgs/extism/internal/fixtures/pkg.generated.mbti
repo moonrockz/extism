@@ -18,6 +18,8 @@ pub fn grow() -> Bytes
 
 pub fn host() -> Bytes
 
+pub fn http_bad_handle() -> Bytes
+
 pub fn init_loop() -> Bytes
 
 pub fn init_trap() -> Bytes

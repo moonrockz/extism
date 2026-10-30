@@ -443,3 +443,35 @@ test "A plugin that does not export its memory prints through WASI on each engin
   assert_eq(call(plugin, "print", b""), b"")
   assert_eq(out, [b"hello"])
 }
+
+///|
+test "proc_exit(0) leaves the plugin usable: a second call returns its output" {
+  let plugin = load(
+    @extism.Manifest::new(@fixtures.wasi_plugin()).wasi(@wasi.Sandbox::new()),
+  )
+  assert_eq(call(plugin, "done", b""), b"\x64")
+  assert_eq(call(plugin, "done", b""), b"\x64")
+  assert_eq(call(plugin, "starts", b""), b"\x01")
+}
+
+///|
+test "proc_exit with another code: the plugin takes no more calls" {
+  let plugin = load(
+    @extism.Manifest::new(@fixtures.wasi_plugin()).wasi(@wasi.Sandbox::new()),
+  )
+  assert_true(call_error(plugin, "exit3", b"") is Exit(3))
+  assert_true(call_error(plugin, "done", b"") is Engine(Unusable))
+}
+
+///|
+test "Denied HTTP request with a bad handle: still Denied, with no method and no URL" {
+  let error = call_error(
+    load(@extism.Manifest::new(@fixtures.http_bad_handle())),
+    "bad_http",
+    b"",
+  )
+  assert_true(
+    error
+    is Denied({ function: "http_request", method_: None, url: None, }),
+  )
+}

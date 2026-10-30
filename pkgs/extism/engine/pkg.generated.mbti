@@ -35,6 +35,7 @@ pub fn EngineError::to_repr(Self) -> @debug.Repr
 
 pub(all) suberror HostError {
   HostError(String)
+  Exit(Int32)
 } derive(Eq, @debug.Debug)
 pub fn HostError::equal(Self, Self) -> Bool
 pub fn HostError::not_equal(Self, Self) -> Bool

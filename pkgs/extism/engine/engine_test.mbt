@@ -445,3 +445,30 @@ test "Teardown: an instance that is the last holder of its module is freed befor
     ])
   }
 }
+
+///|
+test "A host function that ends the call with exit code 0 leaves the instance usable" {
+  let code = Ref(0)
+  let imports = @engine.Imports::new().host(
+    "env",
+    "add",
+    @engine.Signature::new([I64, I64], [I64]),
+    (_, _) => raise @engine.Exit(code.val),
+  )
+  let instance = compile(@fixtures.host()).instantiate(imports)
+  let error = try instance.call("call_add", [I64(1), I64(2)]) catch {
+    error => error
+  } noraise {
+    _ => fail("the call must end")
+  }
+  assert_true(error is Host(Exit(0)))
+  assert_true(instance.is_usable())
+  code.val = 3
+  let error = try instance.call("call_add", [I64(1), I64(2)]) catch {
+    error => error
+  } noraise {
+    _ => fail("the call must end")
+  }
+  assert_true(error is Host(Exit(3)))
+  assert_false(instance.is_usable())
+}

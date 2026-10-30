@@ -296,16 +296,21 @@ fn PluginState::http_request(
   self : PluginState,
   args : Array[@engine.Value],
 ) -> Array[@engine.Value] raise @engine.HostError {
-  let (method_, url, headers) = http_request_of(self.text(handle_arg(args, 0)))
+  // The policy comes first, so a denied call is Denied whatever the plugin gives. The method and the
+  // URL are in the denial when the request can be read.
   guard self.policy.http is Handler(handler) else {
+    let request = try Some(http_request_of(self.text(handle_arg(args, 0)))) catch {
+      _ => None
+    }
     raise self.stop(
       Denied({
         function: "http_request",
-        method_: Some(method_),
-        url: Some(url),
+        method_: request.map(r => r.0),
+        url: request.map(r => r.1),
       }),
     )
   }
+  let (method_, url, headers) = http_request_of(self.text(handle_arg(args, 0)))
   let body = self.read(handle_arg(args, 1)) catch {
     OutOfBounds(_, _) =>
       raise @engine.HostError("the plugin gave a handle outside kernel memory")
@@ -437,6 +442,10 @@ pub fn Plugin::load(
           (function.function)(context, args) catch {
             HostError(message) =>
               raise state.stop(HostFunction(function.label(), message))
+            Exit(code) =>
+              raise state.stop(
+                HostFunction(function.label(), "the function exits with \{code}"),
+              )
           }
         })
         |> ignore
@@ -460,7 +469,10 @@ pub fn Plugin::load(
           })
           match sandbox.call(function, memory, values) {
             Return(errno) => [I32(errno.code())]
-            Exit(code) => raise state.stop(Exit(code))
+            Exit(code) => {
+              state.failure = Some(Exit(code))
+              raise @engine.Exit(code)
+            }
           }
         })
         |> ignore

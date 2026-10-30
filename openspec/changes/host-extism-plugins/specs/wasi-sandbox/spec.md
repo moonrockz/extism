@@ -117,7 +117,8 @@ No function SHALL reach a file, socket, process or the host environment.
 ### Requirement: Process exit
 `proc_exit` SHALL stop the current call and SHALL give its exit code to the caller as a typed result. It SHALL NOT
 stop the embedder's process. In a plugin call, `proc_exit(0)` with no kernel error set SHALL be a successful call
-that returns the output set so far; any other code SHALL fail the call with an exit error that holds the code.
+that returns the output set so far, and the plugin SHALL take more calls, as upstream; any other code SHALL fail
+the call with an exit error that holds the code.
 
 #### Scenario: Plugin exits with code 3
 - **WHEN** a plugin calls `proc_exit(3)` during a call
@@ -126,6 +127,10 @@ that returns the output set so far; any other code SHALL fail the call with an e
 #### Scenario: Plugin exits with code 0
 - **WHEN** a plugin sets its output to `done` and calls `proc_exit(0)` during a call
 - **THEN** the call succeeds and returns `done`
+
+#### Scenario: A call after exit code 0
+- **WHEN** a plugin calls `proc_exit(0)` in one call, and the embedder calls the plugin again, on either engine
+- **THEN** the second call runs and returns its output
 
 ### Requirement: One implementation for every engine
 The sandbox SHALL work only through the guest memory access of the engine layer, so that native and js give the

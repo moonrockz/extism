@@ -464,8 +464,9 @@ rights are <code>fd_read</code> for fd 0 and <code>fd_write</code> for fd 1 and 
 rights</td></tr>
 <tr><td><code>fd_filestat_get</code> on fd 0, 1 and 2</td><td>Success: a character device with size 0, link count
 0 and all times 0</td></tr>
-<tr><td><code>proc_exit</code></td><td>Ends the call. Code 0 with no error set is a successful call that returns
-its output; any other code is an <code>Exit(code)</code> error</td></tr>
+<tr><td><code>proc_exit</code></td><td>Ends the call with the host error <code>Exit(code)</code>. Code 0 with no
+error set is a successful call that returns its output, and the instance takes more calls, as upstream; any other
+code is an <code>Exit(code)</code> error, and the instance takes no more calls</td></tr>
 <tr><td>Any function with an fd other than 0, 1 and 2</td><td><code>EBADF</code> (8)</td></tr>
 <tr><td>Every other function or operation of the 46 preview 1 functions</td><td><code>ENOTCAPABLE</code> (76)</td></tr>
 </tbody>

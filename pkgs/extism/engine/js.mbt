@@ -287,21 +287,10 @@ fn backend_instantiate(
     }
     js_set_import(imports, module_name, name, value)
   }
-  last_host_error.val = None
+  // The prepared module has no start section, so no guest code runs here.
   let result = js_instantiate(compiled, imports)
   if js_failed(result) {
-    let status = js_error_status(result)
-    raise Invalid(
-      match status {
-        17 =>
-          match last_host_error.val {
-            Some(HostError(message)) =>
-              "the start function failed in a host function: \{message}"
-            None => "the start function failed in a host function"
-          }
-        _ => js_error_message(result)
-      },
-    )
+    raise Invalid(js_error_message(result))
   }
   { instance: js_instantiated(result), }
 }
