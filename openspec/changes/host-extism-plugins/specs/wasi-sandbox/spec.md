@@ -56,6 +56,16 @@ functions SHALL return `ENOTCAPABLE`.
 - **WHEN** the embedder supplies no random source and the plugin calls `random_get`
 - **THEN** the call returns `ENOTCAPABLE` and the buffer is not changed
 
+### Requirement: Standard stream status
+`fd_fdstat_get` and `fd_filestat_get` on fd 0, 1 and 2 SHALL succeed, because wasi-libc and CPython check them at
+start-up. `fd_fdstat_get` SHALL give a character device with no flags, the `fd_read` right for fd 0, the
+`fd_write` right for fd 1 and fd 2, and no inheriting rights. `fd_filestat_get` SHALL give a character device with
+device 0, inode 0, link count 0, size 0 and all times 0.
+
+#### Scenario: Start-up checks of stdout
+- **WHEN** a plugin calls `fd_fdstat_get` on fd 1
+- **THEN** the call succeeds and the plugin reads a character device with the `fd_write` right
+
 ### Requirement: No preopens and error codes for all other functions
 The sandbox SHALL have no preopened directories. A function with an fd argument other than 0, 1 and 2 SHALL return
 `EBADF`. Every other function and operation that this spec does not give an answer SHALL return `ENOTCAPABLE`.
@@ -75,11 +85,16 @@ No function SHALL reach a file, socket, process or the host environment.
 
 ### Requirement: Process exit
 `proc_exit` SHALL stop the current call and SHALL give its exit code to the caller as a typed result. It SHALL NOT
-stop the embedder's process.
+stop the embedder's process. In a plugin call, `proc_exit(0)` with no kernel error set SHALL be a successful call
+that returns the output set so far; any other code SHALL fail the call with an exit error that holds the code.
 
 #### Scenario: Plugin exits with code 3
 - **WHEN** a plugin calls `proc_exit(3)` during a call
 - **THEN** the call ends with an exit result that holds 3, and the embedder's process continues
+
+#### Scenario: Plugin exits with code 0
+- **WHEN** a plugin sets its output to `done` and calls `proc_exit(0)` during a call
+- **THEN** the call succeeds and returns `done`
 
 ### Requirement: One implementation for every engine
 The sandbox SHALL work only through the guest memory access of the engine layer, so that native and js give the

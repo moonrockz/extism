@@ -17,6 +17,8 @@ concurrency:
 
 env:
   MISE_EXPERIMENTAL: 'true'
+  # The mise release that installs the pinned tools. The setup action reads it on every runner.
+  MISE_VERSION: v2026.10.20
 
 jobs:
   lint:
@@ -25,7 +27,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Install pinned tools
         uses: ./.github/actions/setup
         with:
@@ -49,7 +51,7 @@ jobs:
         target: [wasm, wasm-gc, js, native]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Install pinned tools
         id: setup
         uses: ./.github/actions/setup
@@ -69,7 +71,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Install pinned tools
         uses: ./.github/actions/setup
         with:
@@ -87,7 +89,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Install pinned tools
         uses: ./.github/actions/setup
         with:

@@ -34,10 +34,14 @@ Every plugin SHALL have its own kernel instance, created from the embedded kerne
 - **WHEN** an embedder loads two plugins and calls both
 - **THEN** each call reads its input from and writes its output to its own kernel memory
 
+#### Scenario: Two plugins from the same bytes
+- **WHEN** an embedder loads two plugins from the same module bytes, sets a different input for each and calls both
+- **THEN** each call returns the output of its own input, on native and on js
+
 ### Requirement: Call by export name
 `call` SHALL reset the kernel, put the input bytes in kernel memory, call the named export with no arguments, and
-return the output bytes when the export returns 0. A non-zero return, a set kernel error or a trap SHALL make the
-call fail with a typed error that holds the return code, the error text or the trap kind.
+return the output bytes when the export returns 0 and no error is set. A non-zero return, a set kernel error or a
+trap SHALL make the call fail with a typed error that holds the return code, the error text or the trap kind.
 
 #### Scenario: Successful call
 - **WHEN** an embedder enables the WASI sandbox and calls `count_vowels` with the input `hello world` on the
@@ -47,6 +51,22 @@ call fail with a typed error that holds the return code, the error text or the t
 #### Scenario: Plugin sets an error
 - **WHEN** the export calls `error_set` with a handle to `bad input` and returns 1
 - **THEN** the call fails with a plugin error that holds the code 1 and the text `bad input`
+
+### Requirement: Set error
+A kernel error SHALL count as set when `error_get` gives a handle that is not 0 and the `length` of that handle is
+not 0, as upstream decides.
+
+#### Scenario: Error handle with no bytes
+- **WHEN** the export calls `error_set` with a handle, frees that handle and returns 0
+- **THEN** the call succeeds, because the error has length 0
+
+### Requirement: Memory limit errors
+When a memory grow of the plugin or of its kernel was refused during a call that fails, the call SHALL fail with a
+memory limit error that names that memory.
+
+#### Scenario: Kernel memory full during a call
+- **WHEN** the kernel memory ceiling is 17 pages and the export allocates 2 MiB in the kernel and then traps
+- **THEN** the call fails with a memory limit error that names the kernel memory
 
 #### Scenario: Unknown export
 - **WHEN** an embedder calls an export name that the module does not export
@@ -83,17 +103,29 @@ each family whether it is allowed with embedder values, answered empty, or denie
 - **THEN** `config_get` and `var_get` give handle 0, `var_set` is denied, log calls are discarded, `get_log_level`
   gives the level that disables logging, and the HTTP functions are denied
 
+#### Scenario: Host function signatures
+- **WHEN** a test reads the linked `extism:host/env` host functions
+- **THEN** their signatures are `config_get (i64) -> i64`, `var_get (i64) -> i64`, `var_set (i64, i64) -> ()`,
+  `log_trace`, `log_debug`, `log_info`, `log_warn` and `log_error (i64) -> ()`, `get_log_level () -> i32`,
+  `http_request (i64, i64) -> i64`, `http_status_code () -> i32` and `http_headers () -> i64`
+
+#### Scenario: Logging off
+- **WHEN** a plugin calls `get_log_level` with the default policy
+- **THEN** it gets 2147483647
+
 #### Scenario: Configuration values
 - **WHEN** the policy allows configuration with the value `mode=strict` and the plugin calls `config_get` for `mode`
 - **THEN** the plugin gets a handle to the bytes `strict`
 
 ### Requirement: Denied host function
 A call of a denied Extism host function SHALL fail the plugin call with a denied error that names the function,
-and the call SHALL NOT reach the network, a file or the embedder's state.
+and the call SHALL NOT reach the network, a file or the embedder's state. For `http_request`, the denied error SHALL also
+hold the method and the URL of the refused request.
 
 #### Scenario: Denied HTTP request
 - **WHEN** a plugin calls `http_request` and the policy denies HTTP
-- **THEN** the plugin call fails with a denied error that names `http_request`, and no request is made
+- **THEN** the plugin call fails with a denied error that names `http_request` and holds the method and the URL of
+  the request, and no request is made
 
 ### Requirement: HTTP only through the embedder
 When the policy allows HTTP, the library SHALL give each request (method, URL, headers and body) to the embedder's
@@ -136,7 +168,8 @@ function error that names the function and holds its message.
 ### Requirement: Plugin limits
 A manifest SHALL set the plugin memory ceiling, the kernel memory ceiling, the per-call instruction budget, the
 per-call deadline and the variable store limit. Each limit that the engine does not enforce SHALL be reported as
-not enforced, and SHALL NOT be reported as enforced.
+not enforced, and SHALL NOT be reported as enforced. Kernel calls of the plugin SHALL NOT count against
+the plugin's instruction budget.
 
 #### Scenario: Limits on js
 - **WHEN** an embedder loads a plugin on js with an instruction budget and a deadline
@@ -144,7 +177,8 @@ not enforced, and SHALL NOT be reported as enforced.
 
 ### Requirement: Same results on native and js
 A plugin call with the same manifest and input SHALL give the same output bytes, the same error kind and the same
-host function calls on the native and the js target.
+host function calls on the native and the js target. This does not apply to an outcome that comes from a bound that
+only one engine enforces, such as an exhausted instruction budget or a deadline.
 
 #### Scenario: Python extension describe
 - **WHEN** the Morphir Python extension `0.4.1` or `0.4.2` gets a `describe` request through `handle` on native,

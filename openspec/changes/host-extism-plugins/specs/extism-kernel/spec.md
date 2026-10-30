@@ -46,16 +46,17 @@ input and output offsets and lengths, and `error_set` and `error_get`.
 
 ### Requirement: Allocation failure
 When an allocation needs more memory than the kernel memory can grow to, `alloc` SHALL return 0 and SHALL NOT
-trap. Kernel memory SHALL NOT grow past the ceiling that the instance has.
+trap. Kernel memory SHALL NOT grow past the ceiling that the instance has. The engine SHALL record the refused grow
+of the kernel memory, as for any memory.
 
 #### Scenario: Kernel memory at its ceiling
 - **WHEN** a plugin calls `alloc` with a size larger than the memory left below the kernel memory ceiling
 - **THEN** `alloc` returns 0 and earlier handles keep their bytes
 
 ### Requirement: Out-of-bounds access
-As upstream does with its default bounds checks, a `load_*` or `input_load_*` call at an offset that is inside
-the root record, past the end of kernel memory or past the input SHALL return 0, and a `store_*` call there SHALL
-change nothing. A kernel call SHALL NOT read or write outside the kernel's linear memory.
+As upstream does with its default bounds checks, a `load_*` or `store_*` call of `n` bytes at offset `p` SHALL run
+only when `p + n - 1` is at least 64 and `p + n` is at most the kernel memory size. Otherwise a load SHALL return 0
+and a store SHALL change nothing. An `input_load_*` call past the input length SHALL return 0.
 
 #### Scenario: Load past the end
 - **WHEN** a plugin calls `load_u64` with an offset 4 bytes before the end of kernel memory
@@ -68,6 +69,28 @@ change nothing. A kernel call SHALL NOT read or write outside the kernel's linea
 #### Scenario: Input past its length
 - **WHEN** the input is 3 bytes and a plugin calls `input_load_u8` with offset 3
 - **THEN** the call returns 0
+
+### Requirement: No trap where upstream traps
+Where upstream traps because `p + n` is larger than the memory size, or because a block walk reads past the memory,
+the kernel SHALL return 0 or change nothing. A kernel call SHALL NOT read or write outside the kernel's linear
+memory.
+
+#### Scenario: Load at the memory size
+- **WHEN** a plugin calls `load_u8` with an offset equal to the kernel memory size
+- **THEN** the call returns 0 and does not trap, where upstream traps
+
+### Requirement: Kernel memory layout
+The kernel module SHALL declare 16 initial pages, SHALL keep its root record in the 64 bytes at offset 1 and its
+first block header at offset 65, as upstream does, and SHALL have no stack and no static data in its linear memory,
+so that a plugin `store_*` call cannot change kernel state other than the root record and the blocks.
+
+#### Scenario: No data and no stack
+- **WHEN** a test reads the embedded kernel bytes
+- **THEN** the module declares 16 initial pages, has no data section, and no function body reads or writes a global
+
+#### Scenario: First handle
+- **WHEN** a plugin calls `alloc(10)` on a new kernel instance
+- **THEN** the handle is 77, as upstream gives
 
 ### Requirement: Embedded bytes match the source
 The library SHALL embed the kernel as bytes in the `moonrockz/extism/kernel` package. A repository check SHALL
