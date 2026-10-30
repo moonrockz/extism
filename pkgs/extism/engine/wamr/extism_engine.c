@@ -109,6 +109,11 @@ on_enlarge_error(uint32_t inc_page_count, uint64_t current_memory_size, uint32_t
   }
 }
 
+static int probe_watchdog(void);
+
+/* Whether a watchdog thread can start: extism_wamr_init probes it once. */
+static int32_t deadline_supported = 0;
+
 int32_t
 extism_wamr_init(host_callback_t callback)
 {
@@ -125,6 +130,7 @@ extism_wamr_init(host_callback_t callback)
   wasm_runtime_set_log_level(WASM_LOG_LEVEL_FATAL);
   wasm_runtime_set_enlarge_mem_error_callback(on_enlarge_error, NULL);
   initialized = 1;
+  deadline_supported = probe_watchdog();
   return 1;
 }
 
@@ -502,6 +508,10 @@ trampoline(wasm_exec_env_t env, uint64_t *args)
 
 static int32_t live_watchdogs = 0;
 
+/* The stack of a watchdog thread: more than PTHREAD_STACK_MIN on every platform (128 KiB on aarch64
+   Linux), or WAMR does not start the thread. */
+#define watchdog_stack (256 * 1024)
+
 #if defined(_WIN32)
 
 typedef struct {
@@ -530,7 +540,7 @@ watchdog_start(Watchdog *watchdog, int32_t deadline_ms, wasm_module_inst_t insta
   if (!watchdog->done) {
     return 0;
   }
-  watchdog->thread = CreateThread(NULL, 64 * 1024, watch, watchdog, 0, NULL);
+  watchdog->thread = CreateThread(NULL, watchdog_stack, watch, watchdog, 0, NULL);
   if (!watchdog->thread) {
     CloseHandle(watchdog->done);
     return 0;
@@ -590,7 +600,7 @@ watchdog_start(Watchdog *watchdog, int32_t deadline_ms, wasm_module_inst_t insta
     os_mutex_destroy(&watchdog->lock);
     return 0;
   }
-  if (os_thread_create(&watchdog->thread, watch, watchdog, 64 * 1024) != 0) {
+  if (os_thread_create(&watchdog->thread, watch, watchdog, watchdog_stack) != 0) {
     os_cond_destroy(&watchdog->done);
     os_mutex_destroy(&watchdog->lock);
     return 0;
@@ -632,7 +642,8 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
   data->host_failed = 0;
   wasm_runtime_set_instruction_count_limit(data->env, budget > 0 ? budget : -1);
   Watchdog watchdog;
-  int watching = deadline_ms > 0 && watchdog_start(&watchdog, deadline_ms, data->instance);
+  int watching = deadline_ms > 0 && deadline_supported
+                 && watchdog_start(&watchdog, deadline_ms, data->instance);
   if (watching) {
     live_watchdogs++;
   }
@@ -647,11 +658,25 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
   return status;
 }
 
-/* Whether a thread for a deadline can start on this platform. */
+/* Whether a watchdog thread can start on this platform: the init probes it once. Without it, a call is
+   bounded by the instruction budget only, and the bounds report gives interruption as not enforced. */
+
+/* Starts and stops one watchdog with a long deadline, which never terminates anything. */
+static int
+probe_watchdog(void)
+{
+  Watchdog watchdog;
+  if (!watchdog_start(&watchdog, 60000, NULL)) {
+    return 0;
+  }
+  watchdog_stop(&watchdog);
+  return 1;
+}
+
 int32_t
 extism_wamr_deadline_supported(void)
 {
-  return initialized;
+  return deadline_supported;
 }
 
 int32_t

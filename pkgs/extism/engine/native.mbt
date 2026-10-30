@@ -104,6 +104,9 @@ extern "C" fn wamr_cell_set(cells : UInt64, index : Int32, value : UInt64) = "ex
 extern "C" fn wamr_live_watchdogs() -> Int32 = "extism_wamr_live_watchdogs"
 
 ///|
+extern "C" fn wamr_deadline_supported() -> Int32 = "extism_wamr_deadline_supported"
+
+///|
 /// The number of deadline watchdog threads that run now. After every call it is 0.
 pub fn live_watchdogs() -> Int32 {
   wamr_live_watchdogs()
@@ -194,7 +197,14 @@ fn backend_features() -> Array[Feature] {
 
 ///|
 fn backend_bounds() -> Bounds {
-  { memory: Enforced, budget: Enforced, interruption: Enforced, }
+  ensure_init()
+  // Where no watchdog thread can start, only the instruction budget bounds a call.
+  let interruption : Bound = if wamr_deadline_supported() == 1 {
+    Enforced
+  } else {
+    NotEnforced
+  }
+  { memory: Enforced, budget: Enforced, interruption, }
 }
 
 ///|
