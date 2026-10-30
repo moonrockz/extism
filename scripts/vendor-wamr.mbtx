@@ -115,7 +115,7 @@ let sources : Array[(String, Condition)] = [
   ("shared/platform/common/posix/posix_sleep.c", Posix),
   ("shared/platform/common/posix/posix_thread.c", Posix),
   ("shared/platform/common/posix/posix_time.c", Posix),
-  ("shared/platform/common/memory/mremap.c", Posix),
+  ("shared/platform/common/memory/mremap.c", Always),
   ("shared/platform/darwin/platform_init.c", Darwin),
   ("shared/platform/linux/platform_init.c", Linux),
   ("shared/platform/windows/platform_init.c", Windows),
