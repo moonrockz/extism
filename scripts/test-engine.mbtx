@@ -25,7 +25,7 @@ let engine_dir : String = "pkgs/extism/engine"
 /// The test files of the engine package for a target.
 fn test_files(target : String) -> Array[String] {
   match target {
-    "native" => ["engine_test.mbt", "native_test.mbt"]
+    "native" => ["engine_test.mbt", "native_test.mbt", "native_wbtest.mbt"]
     "js" => ["engine_test.mbt", "js_test.mbt"]
     _ => ["engine_test.mbt"]
   }

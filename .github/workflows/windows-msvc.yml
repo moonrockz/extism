@@ -1,8 +1,8 @@
 name: Windows MSVC
 
 # The native engine on Windows x64 with MSVC: a fresh consumer of moonrockz/extism compiles the
-# vendored WAMR source with cl.exe and links it, and the engine tests run. It runs on request only,
-# for example for a release candidate.
+# vendored WAMR and SIMDe source with cl.exe and links it, the engine tests run, and the EXT-2 engine
+# gate runs. It runs on request only, for example for a release candidate.
 on:
   workflow_dispatch:
 
@@ -18,7 +18,7 @@ jobs:
   windows-msvc:
     name: Engine (Windows x64, MSVC)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -37,3 +37,7 @@ jobs:
       - name: Test the engine
         timeout-minutes: 10
         run: mise run test:engine -- native 60
+      # The receipt is the JSON line in the log.
+      - name: Run the EXT-2 engine gate
+        timeout-minutes: 10
+        run: mise run qualify:engine -- --json

@@ -31,21 +31,24 @@ let plugin_sha256 : String = "10acafa0f0282c5240e9620a5f2bb21629cc7580b9add528e7
 let work_dir : String = "_build/qualify"
 
 ///|
-/// The commit in the `- Commit:` line of `wamr/UPSTREAM.md`.
+/// The commit in the `- WAMR commit:` line of `wamr/UPSTREAM.md`.
 fn upstream_commit(text : String) -> String? {
+  let prefix = "- WAMR commit: `"
   for line in text.split("\n") {
     let line = line.trim(chars=" \t\r")
-    if line.has_prefix("- Commit: `") {
-      return Some(line["- Commit: `".length():].trim(chars="`").to_owned())
+    if line.has_prefix(prefix) {
+      return Some(line[prefix.length():].trim(chars="`").to_owned())
     }
   }
   None
 }
 
 ///|
-test "upstream_commit reads the commit line" {
+test "upstream_commit reads the WAMR commit line" {
   assert_eq(
-    upstream_commit("# x\n- Tag: `T`\n- Commit: `abc123`\n"),
+    upstream_commit(
+      "# x\n- WAMR tag: `T`\n- WAMR commit: `abc123`\n- SIMDe commit: `def`\n",
+    ),
     Some("abc123"),
   )
   assert_eq(upstream_commit("no commit"), None)
