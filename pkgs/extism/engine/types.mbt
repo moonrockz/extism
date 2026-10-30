@@ -187,6 +187,7 @@ pub(all) enum Feature {
   ExceptionHandling
   Gc
   TailCall
+  MultiMemory
   Unknown(String)
 } derive(Eq, Debug)
 
@@ -206,6 +207,7 @@ pub fn Feature::name(self : Feature) -> String {
     ExceptionHandling => "exception-handling"
     Gc => "gc"
     TailCall => "tail-call"
+    MultiMemory => "multi-memory"
     Unknown(what) => "unknown (\{what})"
   }
 }
@@ -219,6 +221,7 @@ fn Feature::of(feature : @binary.Feature) -> Feature {
     ExceptionHandling => ExceptionHandling
     Gc => Gc
     TailCall => TailCall
+    MultiMemory => MultiMemory
     Unknown(what) => Unknown(what)
   }
 }

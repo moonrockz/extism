@@ -188,3 +188,20 @@ test "A vector count larger than the bytes left is a decode error, with no large
   let bytes = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x07\x01\x60\xff\xff\xff\xff\x0f"
   assert_true(refused(() => @binary.Module::parse(bytes)))
 }
+
+///|
+test "Multiple memories: two memories, or a memory index in a memarg, need multi-memory" {
+  // (module (memory 1) (memory 1))
+  let two = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x05\x02\x00\x01\x00\x01"
+  assert_eq(@binary.Module::parse(two).features(), [MultiMemory])
+  // (module (memory 1)) with one memory needs no feature.
+  let one = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x03\x01\x00\x01"
+  assert_eq(@binary.Module::parse(one).features(), [])
+  // (module (import "env" "m" (memory 1)) (memory 1))
+  let imported = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x02\x0a\x01\x03env\x01m\x02\x00\x01\x05\x03\x01\x00\x01"
+  assert_eq(@binary.Module::parse(imported).features(), [MultiMemory])
+  // (module (memory 1) (func i32.const 0 i32.load (memory 0) offset=0 drop)) with the memory index
+  // encoded explicitly: the 0x40 flag of the alignment.
+  let memarg = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x05\x03\x01\x00\x01\x0a\x0b\x01\x09\x00\x41\x00\x28\x42\x00\x00\x1a\x0b"
+  assert_eq(@binary.Module::parse(memarg).features(), [MultiMemory])
+}

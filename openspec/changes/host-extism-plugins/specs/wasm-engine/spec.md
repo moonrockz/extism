@@ -127,8 +127,8 @@ enforced or not enforced. A caller SHALL be able to read the report before it ru
 
 ### Requirement: Feature errors
 The engine SHALL refuse at load a module that needs a WASM feature that the engine does not support, with an
-error that names the feature from a closed set, for example `simd`, `threads`, `memory64`, `exception-handling`
-or `gc`. When the engine cannot name the feature, the error SHALL say that it is unknown. Both engines SHALL
+error that names the feature from a closed set, for example `simd`, `threads`, `memory64`, `multi-memory`,
+`exception-handling` or `gc`. When the engine cannot name the feature, the error SHALL say that it is unknown. Both engines SHALL
 find the feature with the same pure scan of the module bytes, so that the native and the js engine name the same
 feature.
 
@@ -139,6 +139,11 @@ feature.
 #### Scenario: Feature that the engine does not support
 - **WHEN** a module with a shared memory loads on either engine
 - **THEN** the load fails with a feature error that names `threads`, before any call
+
+#### Scenario: Multiple memories
+- **WHEN** a module with two memories, or with a memory index other than 0 in an instruction, loads on the
+  native or the js engine
+- **THEN** the load fails on both engines with the same feature error, which names `multi-memory`
 
 #### Scenario: Feature scan
 - **WHEN** the scan reads a module with a `v128` instruction, a shared memory and a 64-bit memory

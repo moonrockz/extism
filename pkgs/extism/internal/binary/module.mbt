@@ -113,6 +113,7 @@ pub(all) enum Feature {
   ExceptionHandling
   Gc
   TailCall
+  MultiMemory
   Unknown(String)
 } derive(Eq, Debug)
 
@@ -357,6 +358,11 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
       13 => add_feature(features, ExceptionHandling)
       _ => ()
     }
+  }
+  // Both engines take one memory; a second one, defined or imported, is the multi-memory proposal.
+  let imported_memories = imports.iter().filter(i => i.type_ is Memory(_)).count()
+  if imported_memories + memories.length() > 1 {
+    add_feature(features, MultiMemory)
   }
   let module_ = {
     bytes,

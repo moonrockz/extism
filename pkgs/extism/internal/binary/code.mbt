@@ -34,13 +34,24 @@ fn Reader::block_type(self : Reader, scan : Scan) -> Unit raise DecodeError {
 }
 
 ///|
-fn Reader::memarg(self : Reader) -> Unit raise DecodeError {
+fn Reader::memarg(self : Reader, scan : Scan) -> Unit raise DecodeError {
   let align = self.u32()
   if (align & 0x40) != 0 {
     // The memory index of the multi-memory proposal.
+    add_feature(scan.features, MultiMemory)
     self.u32() |> ignore
   }
   self.unsigned(bits=64) |> ignore
+}
+
+///|
+/// Reads a memory index; an index other than 0 needs the multi-memory proposal.
+fn Reader::memory_index(self : Reader, scan : Scan) -> Int32 raise DecodeError {
+  let index = self.u32()
+  if index != 0 {
+    add_feature(scan.features, MultiMemory)
+  }
+  index
 }
 
 ///|
@@ -92,11 +103,11 @@ fn Reader::instruction(
       self.u32() |> ignore
     }
     0x25 | 0x26 => self.u32() |> ignore
-    _ if opcode >= 0x28 && opcode <= 0x3e => self.memarg()
-    0x3f => self.u32() |> ignore
+    _ if opcode >= 0x28 && opcode <= 0x3e => self.memarg(scan)
+    0x3f => self.memory_index(scan) |> ignore
     0x40 => {
       let at = self.at - 1
-      if self.u32() == 0 {
+      if self.memory_index(scan) == 0 {
         scan.grows.push(at)
       }
     }
@@ -121,14 +132,14 @@ fn Reader::instruction(
         _ if sub <= 7 => ()
         8 => {
           self.u32() |> ignore
-          self.u32() |> ignore
+          self.memory_index(scan) |> ignore
         }
         9 => self.u32() |> ignore
         10 => {
-          self.u32() |> ignore
-          self.u32() |> ignore
+          self.memory_index(scan) |> ignore
+          self.memory_index(scan) |> ignore
         }
-        11 => self.u32() |> ignore
+        11 => self.memory_index(scan) |> ignore
         12 | 14 => {
           self.u32() |> ignore
           self.u32() |> ignore

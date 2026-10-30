@@ -372,3 +372,17 @@ test "Feature that the engine does not support: a shared memory names threads on
   }
   assert_true(error is FeatureUnsupported(Threads))
 }
+
+///|
+test "Multiple memories: both engines refuse the module with the feature multi-memory" {
+  // (module (memory 1) (memory 1))
+  let two = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x05\x02\x00\x01\x00\x01"
+  assert_eq(@engine.Feature::scan(two), [MultiMemory])
+  assert_eq(@engine.Feature::MultiMemory.name(), "multi-memory")
+  let error = try @engine.Engine::default().compile(two) catch {
+    error => error
+  } noraise {
+    _ => fail("the load must fail")
+  }
+  assert_true(error is FeatureUnsupported(MultiMemory))
+}
