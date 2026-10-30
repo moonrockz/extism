@@ -325,3 +325,103 @@ test "the table has the preview 1 signatures" {
   assert_eq(@wasi.Function::SchedYield.results(), [I32])
   assert_eq(@wasi.import_namespace, "wasi_snapshot_preview1")
 }
+
+///|
+test "Sink bound: 1 byte to 16 MiB, 1 MiB by default" {
+  let refused = (bytes : Int) => {
+    try @wasi.SinkBound::parse(bytes) catch {
+      SinkBoundError(_, _) => true
+    } noraise {
+      _ => false
+    }
+  }
+  assert_true(refused(0))
+  assert_eq(@wasi.SinkBound::parse(1).bytes(), 1)
+  assert_eq(@wasi.SinkBound::parse(16 * 1024 * 1024).bytes(), 16 * 1024 * 1024)
+  assert_true(refused(16 * 1024 * 1024 + 1))
+  assert_true(refused(-1))
+  assert_eq(@wasi.SinkBound::default().bytes(), 1024 * 1024)
+}
+
+///|
+test "fd_write sends each iovec to the sink on its own, in order" {
+  let calls : Array[Bytes] = []
+  let sandbox = @wasi.Sandbox::new().stdout(bytes => calls.push(bytes.to_owned()))
+  let memory = plain()
+  put(memory, 200, b"hello")
+  put_u32(memory, 0, 200)
+  put_u32(memory, 4, 3)
+  put_u32(memory, 8, 203)
+  put_u32(memory, 12, 2)
+  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 2, 100]), Return(Success))
+  assert_eq(calls, [b"hel", b"lo"])
+}
+
+///|
+test "fd_write with more than 1024 iovecs is EINVAL and sends nothing" {
+  let calls = []
+  let sandbox = @wasi.Sandbox::new().stdout(bytes => calls.push(bytes.to_owned()))
+  let memory = plain()
+  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 1025, 100]), Return(Inval))
+  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 0xffffffff, 100]), Return(Inval))
+  assert_eq(calls.length(), 0)
+  assert_true(memory.bytes[100:104].iter().all(b => b == b'\xaa'))
+}
+
+///|
+test "fd_write with a range outside memory is EFAULT and sends nothing, also after a valid iovec" {
+  let calls = []
+  let sandbox = @wasi.Sandbox::new().stdout(bytes => calls.push(bytes.to_owned()))
+  let memory = plain()
+  put(memory, 200, b"hello")
+  // A valid first iovec, then one that ends past the memory.
+  put_u32(memory, 0, 200)
+  put_u32(memory, 4, 5)
+  put_u32(memory, 8, 1020)
+  put_u32(memory, 12, 5)
+  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 2, 100]), Return(Fault))
+  // A length of 2^32 - 1, which is negative as a 32-bit signed number.
+  put_u32(memory, 12, -1)
+  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 2, 100]), Return(Fault))
+  // An iovec array that ends past the memory.
+  assert_eq(call(sandbox, FdWrite, memory, [1, 1020, 1, 100]), Return(Fault))
+  // An nwritten pointer outside the memory.
+  put_u32(memory, 8, 205)
+  put_u32(memory, 12, 0)
+  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 2, 1022]), Return(Fault))
+  assert_eq(calls.length(), 0)
+}
+
+///|
+test "fd_write over the sink bound writes the first bytes up to the bound and reports them" {
+  let calls : Array[Bytes] = []
+  let sandbox = @wasi.Sandbox::new().stdout(
+    bytes => calls.push(bytes.to_owned()),
+    bound=@wasi.SinkBound::parse(4),
+  )
+  let memory = plain()
+  put(memory, 200, b"hello")
+  put_u32(memory, 0, 200)
+  put_u32(memory, 4, 3)
+  put_u32(memory, 8, 203)
+  put_u32(memory, 12, 2)
+  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 2, 100]), Return(Success))
+  assert_eq(u32_at(memory, 100), 4)
+  assert_eq(calls, [b"hel", b"l"])
+}
+
+///|
+test "random_get outside memory, or with a length of 2^31 or more, is EFAULT and the source is not called" {
+  let asked = []
+  let sandbox = @wasi.Sandbox::new().random(n => {
+    asked.push(n)
+    Bytes::make(n, b'\x07')
+  })
+  let memory = plain()
+  assert_eq(call(sandbox, RandomGet, memory, [1020, 8]), Return(Fault))
+  assert_eq(call(sandbox, RandomGet, memory, [0, 0x80000000]), Return(Fault))
+  assert_eq(call(sandbox, RandomGet, memory, [0, 0xffffffff]), Return(Fault))
+  assert_eq(asked.length(), 0)
+  assert_eq(call(sandbox, RandomGet, memory, [1016, 8]), Return(Success))
+  assert_eq(asked, [8])
+}

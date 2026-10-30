@@ -452,9 +452,13 @@ response headers, or 0</td></tr>
 <tr><td><code>args_sizes_get</code>, <code>args_get</code>, <code>environ_sizes_get</code>,
 <code>environ_get</code></td><td>Zero entries; success</td></tr>
 <tr><td><code>fd_read</code> on fd 0</td><td>0 bytes (end of file)</td></tr>
-<tr><td><code>fd_write</code> on fd 1 and fd 2</td><td>The embedder's sinks; all bytes written</td></tr>
+<tr><td><code>fd_write</code> on fd 1 and fd 2</td><td>The embedder's sinks, one iovec at a time, at most the
+sink's <code>SinkBound</code> per call (1 byte to 16 MiB, 1 MiB by default): the first bytes up to the bound are
+written and reported. More than 1024 iovecs: <code>EINVAL</code> (28). Any range outside guest memory:
+<code>EFAULT</code> (21), checked before a byte goes to the sink</td></tr>
 <tr><td><code>clock_time_get</code>, <code>clock_res_get</code>, <code>random_get</code></td><td>The embedder's
-sources; <code>ENOTCAPABLE</code> (76) without one</td></tr>
+sources; <code>ENOTCAPABLE</code> (76) without one. <code>random_get</code> checks its range against guest memory
+before it calls the source</td></tr>
 <tr><td><code>fd_fdstat_get</code> on fd 0, 1 and 2</td><td>Success: a character device with no flags; the
 rights are <code>fd_read</code> for fd 0 and <code>fd_write</code> for fd 1 and fd 2, and no inheriting
 rights</td></tr>

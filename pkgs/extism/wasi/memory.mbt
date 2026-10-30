@@ -24,19 +24,6 @@ pub(open) trait GuestMemory {
 }
 
 ///|
-fn[M : GuestMemory] read_u32(
-  memory : M,
-  at : Int64,
-) -> Int64 raise GuestMemoryError {
-  let bytes = memory.read(at, 4)
-  let value = bytes[0].to_int64() |
-    (bytes[1].to_int64() << 8) |
-    (bytes[2].to_int64() << 16) |
-    (bytes[3].to_int64() << 24)
-  value
-}
-
-///|
 fn little(value : UInt64, count : Int32) -> Bytes {
   Bytes::makei(count, i => (value >> (8 * i)).to_byte())
 }
@@ -60,16 +47,37 @@ fn[M : GuestMemory] write_u64(
 }
 
 ///|
-/// The `(buffer, length)` pairs of an iovec array.
+/// The most iovecs that one call takes.
+pub let max_iovecs : Int = 1024
+
+///|
+/// Whether `length` bytes at `offset` are inside the memory.
+fn[M : GuestMemory] inside(memory : M, offset : Int64, length : Int64) -> Bool {
+  offset >= 0L && length >= 0L && offset + length <= memory.size()
+}
+
+///|
+/// The `(buffer, length)` pairs of an iovec array of at most `max_iovecs` entries, each of them inside
+/// the memory. Gives `None` for too many iovecs. A pair outside the memory raises `OutOfBounds`, before
+/// any byte of a buffer is read.
 fn[M : GuestMemory] iovecs(
   memory : M,
   at : Int64,
   count : Int64,
-) -> Array[(Int64, Int32)] raise GuestMemoryError {
-  let pairs = []
-  for i = 0L; i < count; i = i + 1L {
-    let entry = at + 8L * i
-    pairs.push((read_u32(memory, entry), read_u32(memory, entry + 4L).to_int()))
+) -> Array[(Int64, Int64)]? raise GuestMemoryError {
+  guard count <= max_iovecs.to_int64() else { return None }
+  let entries = memory.read(at, (8L * count).to_int())
+  let word = (i : Int) => {
+    entries[i].to_int64() |
+    (entries[i + 1].to_int64() << 8) |
+    (entries[i + 2].to_int64() << 16) |
+    (entries[i + 3].to_int64() << 24)
   }
-  pairs
+  let pairs = Array::makei(count.to_int(), i => (word(8 * i), word(8 * i + 4)))
+  for pair in pairs {
+    guard inside(memory, pair.0, pair.1) else {
+      raise OutOfBounds(pair.0, pair.1.to_int())
+    }
+  }
+  Some(pairs)
 }

@@ -1,7 +1,7 @@
 // The WASI preview 1 sandbox (`moonrockz/extism/wasi`). It works on guest memory through the
 // GuestMemory trait, which the engine implements, so it has no engine import and supports all four targets.
 import {
-  "moonbitlang/core/buffer",
+  "moonbitlang/core/cmp",
   "moonbitlang/core/debug",
 }
 

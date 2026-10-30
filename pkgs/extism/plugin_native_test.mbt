@@ -51,3 +51,28 @@ test "Host function table on native: loading and dropping many plugins keeps it 
   // At most the entries of the plugins that are still alive (none) or not yet released.
   assert_true(@engine.host_entry_count() <= 64)
 }
+
+///|
+test "A guest that writes in a loop: each fd_write gives the sink at most its bound, and the call ends at the deadline" {
+  let largest = Ref(0)
+  let calls = Ref(0)
+  let sandbox = @wasi.Sandbox::new().stdout(
+    bytes => {
+      calls.val += 1
+      if bytes.length() > largest.val {
+        largest.val = bytes.length()
+      }
+    },
+    bound=@wasi.SinkBound::parse(4096),
+  )
+  let limits = @extism.Limits::default()
+    .deadline(@engine.Deadline::parse(200))
+    .budget(@engine.Budget::parse(2147483647L))
+  let plugin = @extism.Plugin::load(
+    @extism.Manifest::new(@fixtures.wasi_flood()).wasi(sandbox).limits(limits),
+  )
+  let error = call_error(plugin, "flood", b"")
+  assert_true(error is Engine(Interrupted))
+  assert_true(calls.val > 0)
+  assert_true(largest.val <= 4096)
+}

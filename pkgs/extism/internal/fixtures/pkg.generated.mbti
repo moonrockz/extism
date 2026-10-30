@@ -42,6 +42,8 @@ pub fn traps() -> Bytes
 
 pub fn unknown_import() -> Bytes
 
+pub fn wasi_flood() -> Bytes
+
 pub fn wasi_hidden_memory() -> Bytes
 
 pub fn wasi_plugin() -> Bytes

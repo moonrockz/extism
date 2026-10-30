@@ -79,6 +79,66 @@ pub extend Outcome with Eq::{equal, not_equal}
 pub extend Outcome with @debug.Debug::{to_repr}
 
 ///|
+/// A sink bound that breaks its rule: the bytes and the rule.
+pub(all) suberror SinkBoundError {
+  SinkBoundError(Int, String)
+} derive(Eq, Debug)
+
+///|
+pub extend SinkBoundError with Eq::{equal, not_equal}
+
+///|
+pub extend SinkBoundError with @debug.Debug::{to_repr}
+
+///|
+/// The most bytes that one `fd_write` gives a sink: 1 byte to 16 MiB. The bound applies to each call;
+/// a guest that writes in a loop makes many calls, so the embedder's sink bounds the total itself, for
+/// example with a tail of the last bytes.
+pub struct SinkBound {
+  priv bytes : Int
+} derive(Eq, Debug)
+
+///|
+pub extend SinkBound with Eq::{equal, not_equal}
+
+///|
+pub extend SinkBound with @debug.Debug::{to_repr}
+
+///|
+/// The largest sink bound: 16 MiB.
+let max_sink_bound : Int = 16 * 1024 * 1024
+
+///|
+/// A sink bound of `bytes` bytes, from 1 to 16 MiB.
+pub fn SinkBound::parse(bytes : Int) -> SinkBound raise SinkBoundError {
+  guard bytes >= 1 && bytes <= max_sink_bound else {
+    raise SinkBoundError(
+      bytes,
+      "a sink bound is from 1 byte to \{max_sink_bound} bytes",
+    )
+  }
+  { bytes, }
+}
+
+///|
+/// The default sink bound: 1 MiB.
+pub fn SinkBound::default() -> SinkBound {
+  { bytes: 1024 * 1024 }
+}
+
+///|
+pub fn SinkBound::bytes(self : SinkBound) -> Int {
+  self.bytes
+}
+
+///|
+/// A sink of the embedder and its bound.
+priv struct Sink {
+  write : (BytesView) -> Unit
+  bound : SinkBound
+}
+
+///|
 /// The WASI preview 1 sandbox of a plugin: no preopens, empty arguments, environment and stdin, clocks
 /// and random bytes from sources that the embedder gives, and stdout and stderr to sinks that the
 /// embedder gives. Every other function returns `ENOTCAPABLE` or `EBADF`. The builder steps give a new
@@ -86,8 +146,8 @@ pub extend Outcome with @debug.Debug::{to_repr}
 pub struct Sandbox {
   priv clock : Clock?
   priv random : ((Int32) -> Bytes)?
-  priv stdout : ((BytesView) -> Unit)?
-  priv stderr : ((BytesView) -> Unit)?
+  priv stdout : Sink?
+  priv stderr : Sink?
 }
 
 ///|
@@ -109,15 +169,25 @@ pub fn Sandbox::random(self : Sandbox, source : (Int32) -> Bytes) -> Sandbox {
 }
 
 ///|
-/// The sandbox with a sink for the bytes that the guest writes to fd 1.
-pub fn Sandbox::stdout(self : Sandbox, sink : (BytesView) -> Unit) -> Sandbox {
-  { ..self, stdout: Some(sink), }
+/// The sandbox with a sink for the bytes that the guest writes to fd 1. One `fd_write` gives the sink
+/// at most `bound` bytes, one iovec at a time; it writes the first `bound` bytes and reports them, as a
+/// POSIX `write` that writes part of its bytes.
+pub fn Sandbox::stdout(
+  self : Sandbox,
+  sink : (BytesView) -> Unit,
+  bound~ : SinkBound = SinkBound::default(),
+) -> Sandbox {
+  { ..self, stdout: Some({ write: sink, bound }) }
 }
 
 ///|
-/// The sandbox with a sink for the bytes that the guest writes to fd 2.
-pub fn Sandbox::stderr(self : Sandbox, sink : (BytesView) -> Unit) -> Sandbox {
-  { ..self, stderr: Some(sink), }
+/// The sandbox with a sink for the bytes that the guest writes to fd 2, with the rules of `stdout`.
+pub fn Sandbox::stderr(
+  self : Sandbox,
+  sink : (BytesView) -> Unit,
+  bound~ : SinkBound = SinkBound::default(),
+) -> Sandbox {
+  { ..self, stderr: Some({ write: sink, bound }) }
 }
 
 ///|
@@ -215,16 +285,25 @@ fn[M : GuestMemory] Sandbox::answer(
         _ => None
       }
       guard sink is Some(sink) else { return Notcapable }
-      let mut total = 0L
-      let gathered = @buffer.Buffer()
-      for pair in iovecs(memory, arg(1), arg(2)) {
-        gathered.write_bytes(memory.read(pair.0, pair.1))
-        total = total + pair.1.to_int64()
+      // Every range is checked before any byte goes to the sink.
+      guard iovecs(memory, arg(1), arg(2)) is Some(pairs) else { return Inval }
+      guard inside(memory, arg(3), 4L) else {
+        raise OutOfBounds(arg(3), 4)
       }
-      write_u32(memory, arg(3), total)
-      if sink is Some(sink) {
-        sink(gathered.to_bytes())
+      let bound = match sink {
+        Some(sink) => sink.bound.bytes().to_int64()
+        None => SinkBound::default().bytes().to_int64()
       }
+      let mut written = 0L
+      for pair in pairs {
+        let (buffer, length) = pair
+        let part = @cmp.minimum(length, bound - written)
+        if part > 0L && sink is Some(sink) {
+          (sink.write)(memory.read(buffer, part.to_int()))
+        }
+        written = written + part
+      }
+      write_u32(memory, arg(3), written)
       Success
     }
     FdFdstatGet => {
@@ -264,6 +343,11 @@ fn[M : GuestMemory] Sandbox::answer(
     }
     RandomGet => {
       guard self.random is Some(source) else { return Notcapable }
+      // The range is checked before the embedder's source runs; a length of 2^31 or more is larger
+      // than a guest memory that the engines give.
+      guard arg(1) < 0x80000000L && inside(memory, arg(0), arg(1)) else {
+        raise OutOfBounds(arg(0), arg(1).to_int())
+      }
       let length = arg(1).to_int()
       let bytes = source(length)
       guard bytes.length() == length else { return Notcapable }

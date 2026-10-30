@@ -399,3 +399,23 @@ pub fn spin_n() -> Bytes {
     "0061736d0100000001090260017f006000017f0303020001071002067370696e5f6e0000036f6e6500010a1a0213000340200041016b2100200041004a0d000b0b040041010b000d046e616d65030601000100016c",
   )
 }
+
+///|
+/// A WASI plugin that writes 64 KiB to stdout in a loop that does not end.
+/// ```wat
+/// (module
+///   (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+///   (memory 2)
+///   (func (export "flood") (result i32)
+///     (i32.store (i32.const 0) (i32.const 1024))
+///     (i32.store (i32.const 4) (i32.const 65536))
+///     (loop $l
+///       (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+///       (br $l))
+///     (i32.const 0)))
+/// ```
+pub fn wasi_flood() -> Bytes {
+  hex(
+    "0061736d01000000010d0260047f7f7f7f017f6000017f02230116776173695f736e617073686f745f70726576696577310866645f7772697465000003020101050301000207090105666c6f6f6400010a2701250041004180083602004104418080043602000340410141004101410810001a0c000b41000b001a046e616d65010b01000866645f7772697465030601010100016c",
+  )
+}
