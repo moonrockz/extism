@@ -137,8 +137,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run the engine gate
         run: mise run qualify:engine -- --json
+      - name: Check the Python describe responses on native and js
+        run: mise run test:python
       - name: Build and run a fresh consumer
         run: mise run check:consumer
+      - name: Check the Python describe responses on native and js
+        run: mise run test:python
 
   # A single required check for branch protection.
   ci-ok:

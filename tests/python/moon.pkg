@@ -1,0 +1,13 @@
+// The plugin API runs on native and js only.
+supported_targets = "+native+js"
+
+import {
+  "moonrockz/extism",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/x/crypto",
+}
+
+import {
+  "moonbitlang/core/env",
+  "moonbitlang/x/fs",
+} for "test"

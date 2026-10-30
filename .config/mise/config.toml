@@ -135,6 +135,10 @@ run = "moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx"
 description = "Build and run a fresh consumer of moonrockz/extism outside the repository (args: targets; default: native js)"
 run = "moonx scripts/toolchain.mbtx scripts/consumer.mbtx"
 
+[tasks."test:python"]
+description = "Check that the Python extension 0.4.1 and 0.4.2 give the pinned info and describe responses on native and js (args: --browser)"
+run = "moonx scripts/toolchain.mbtx scripts/python.mbtx"
+
 [tasks.check]
 description = "Run lint, validate, OpenSpec validation, tests, task script tests, builds and the site check"
 run = "moonx scripts/toolchain.mbtx scripts/check.mbtx"
