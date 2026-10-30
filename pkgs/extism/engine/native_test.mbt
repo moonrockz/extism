@@ -29,8 +29,11 @@ test "Runaway loop on native: a budget of 1,000,000 instructions stops the call"
 test "Deadline on native: a loop with a 100 ms deadline stops within 1 second" {
   let instance = spin_instance()
   let deadline = @engine.Deadline::parse(100)
+  // The largest budget is a backstop: when the deadline does not stop the loop, the call ends with
+  // BudgetExhausted after some seconds and the test fails, instead of a run that never ends.
+  let backstop = @engine.Budget::parse(2147483647L)
   let start = @env.now()
-  let error = try instance.call("spin", [], deadline~) catch {
+  let error = try instance.call("spin", [], deadline~, budget=backstop) catch {
     error => error
   } noraise {
     _ => fail("the call must stop")

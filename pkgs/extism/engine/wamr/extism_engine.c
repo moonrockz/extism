@@ -493,7 +493,61 @@ trampoline(wasm_exec_env_t env, uint64_t *args)
   }
 }
 
-/* ---- The deadline watchdog ---- */
+/* ---- The deadline watchdog ----
+ *
+ * A watchdog thread waits for the end of the call up to the deadline, and calls wasm_runtime_terminate
+ * when the deadline passes. The call always stops and joins it before it returns. Windows uses Win32
+ * primitives directly: WAMR's Windows thread layer shares one wait semaphore per thread between its
+ * condition variables and its joins, and keeps the record of each thread that ends. */
+
+static int32_t live_watchdogs = 0;
+
+#if defined(_WIN32)
+
+typedef struct {
+  HANDLE done;
+  DWORD milliseconds;
+  wasm_module_inst_t instance;
+  HANDLE thread;
+} Watchdog;
+
+static DWORD WINAPI
+watch(LPVOID arg)
+{
+  Watchdog *watchdog = (Watchdog *)arg;
+  if (WaitForSingleObject(watchdog->done, watchdog->milliseconds) == WAIT_TIMEOUT) {
+    wasm_runtime_terminate(watchdog->instance);
+  }
+  return 0;
+}
+
+static int
+watchdog_start(Watchdog *watchdog, int32_t deadline_ms, wasm_module_inst_t instance)
+{
+  watchdog->milliseconds = (DWORD)deadline_ms;
+  watchdog->instance = instance;
+  watchdog->done = CreateEventW(NULL, TRUE, FALSE, NULL);
+  if (!watchdog->done) {
+    return 0;
+  }
+  watchdog->thread = CreateThread(NULL, 64 * 1024, watch, watchdog, 0, NULL);
+  if (!watchdog->thread) {
+    CloseHandle(watchdog->done);
+    return 0;
+  }
+  return 1;
+}
+
+static void
+watchdog_stop(Watchdog *watchdog)
+{
+  SetEvent(watchdog->done);
+  WaitForSingleObject(watchdog->thread, INFINITE);
+  CloseHandle(watchdog->thread);
+  CloseHandle(watchdog->done);
+}
+
+#else
 
 typedef struct {
   korp_mutex lock;
@@ -501,9 +555,8 @@ typedef struct {
   int finished;
   uint64_t microseconds;
   wasm_module_inst_t instance;
+  korp_tid thread;
 } Watchdog;
-
-static int32_t live_watchdogs = 0;
 
 static void *
 watch(void *arg)
@@ -523,6 +576,41 @@ watch(void *arg)
   os_mutex_unlock(&watchdog->lock);
   return NULL;
 }
+
+static int
+watchdog_start(Watchdog *watchdog, int32_t deadline_ms, wasm_module_inst_t instance)
+{
+  memset(watchdog, 0, sizeof(*watchdog));
+  watchdog->microseconds = (uint64_t)deadline_ms * 1000;
+  watchdog->instance = instance;
+  if (os_mutex_init(&watchdog->lock) != 0) {
+    return 0;
+  }
+  if (os_cond_init(&watchdog->done) != 0) {
+    os_mutex_destroy(&watchdog->lock);
+    return 0;
+  }
+  if (os_thread_create(&watchdog->thread, watch, watchdog, 64 * 1024) != 0) {
+    os_cond_destroy(&watchdog->done);
+    os_mutex_destroy(&watchdog->lock);
+    return 0;
+  }
+  return 1;
+}
+
+static void
+watchdog_stop(Watchdog *watchdog)
+{
+  os_mutex_lock(&watchdog->lock);
+  watchdog->finished = 1;
+  os_cond_signal(&watchdog->done);
+  os_mutex_unlock(&watchdog->lock);
+  os_thread_join(watchdog->thread, NULL);
+  os_cond_destroy(&watchdog->done);
+  os_mutex_destroy(&watchdog->lock);
+}
+
+#endif
 
 int32_t
 extism_wamr_live_watchdogs(void)
@@ -544,37 +632,13 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
   data->host_failed = 0;
   wasm_runtime_set_instruction_count_limit(data->env, budget > 0 ? budget : -1);
   Watchdog watchdog;
-  korp_tid thread;
-  int watching = 0;
-  if (deadline_ms > 0) {
-    memset(&watchdog, 0, sizeof(watchdog));
-    watchdog.microseconds = (uint64_t)deadline_ms * 1000;
-    watchdog.instance = data->instance;
-    if (os_mutex_init(&watchdog.lock) == 0) {
-      if (os_cond_init(&watchdog.done) == 0) {
-        if (os_thread_create(&thread, watch, &watchdog, 64 * 1024) == 0) {
-          watching = 1;
-          live_watchdogs++;
-        }
-        else {
-          os_cond_destroy(&watchdog.done);
-          os_mutex_destroy(&watchdog.lock);
-        }
-      }
-      else {
-        os_mutex_destroy(&watchdog.lock);
-      }
-    }
+  int watching = deadline_ms > 0 && watchdog_start(&watchdog, deadline_ms, data->instance);
+  if (watching) {
+    live_watchdogs++;
   }
   int32_t status = call_cells(data, data->env, function, cells);
   if (watching) {
-    os_mutex_lock(&watchdog.lock);
-    watchdog.finished = 1;
-    os_cond_signal(&watchdog.done);
-    os_mutex_unlock(&watchdog.lock);
-    os_thread_join(thread, NULL);
-    os_cond_destroy(&watchdog.done);
-    os_mutex_destroy(&watchdog.lock);
+    watchdog_stop(&watchdog);
     live_watchdogs--;
   }
   if (status != EXTISM_STATUS_OK && data->host_failed) {

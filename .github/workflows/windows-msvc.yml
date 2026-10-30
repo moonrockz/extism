@@ -22,7 +22,7 @@ jobs:
   windows-msvc:
     name: Engine (Windows x64, MSVC)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -35,6 +35,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and run a fresh consumer
+        timeout-minutes: 10
         run: mise run check:consumer -- native
+      # One test at a time, each with a limit of 60 seconds and its name printed first.
       - name: Test the engine
-        run: mise run test -- native
+        timeout-minutes: 10
+        run: mise run test:engine -- native 60
