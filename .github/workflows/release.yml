@@ -20,6 +20,7 @@ name: Release
 on:
   push:
     tags: ['v*']
+    branches: [DamianReeves/extism-host]
   pull_request:
     paths:
       - .github/workflows/release.yml
@@ -74,7 +75,7 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run == true && 'true' || 'false' }}
+          DRY_RUN: ${{ (inputs.dry_run == true || github.ref_type == 'branch') && 'true' || 'false' }}
         run: mise run release:plan
 
   checks:
