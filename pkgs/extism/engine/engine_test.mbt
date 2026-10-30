@@ -433,3 +433,15 @@ test "a module that exports a reserved name is refused" {
   }
   assert_true(error is Invalid(_))
 }
+
+///|
+test "Teardown: an instance that is the last holder of its module is freed before the module" {
+  for i in 0..<300 {
+    let instance = @engine.Engine::default()
+      .compile(@fixtures.add())
+      .instantiate(@engine.Imports::new())
+    assert_eq(instance.call("add", [I64(i.to_int64()), I64(1)]), [
+      I64(i.to_int64() + 1L),
+    ])
+  }
+}

@@ -30,6 +30,8 @@ pub fn simd() -> Bytes
 
 pub fn simd_probe() -> Bytes
 
+pub fn spin_n() -> Bytes
+
 pub fn start_host() -> Bytes
 
 pub fn start_loop() -> Bytes

@@ -351,8 +351,17 @@ budget.</p>
 when the deadline passes. WAMR is built with <code>WASM_ENABLE_THREAD_MGR=1</code>, so that the fast interpreter
 sees the terminate flag at its <code>CHECK_SUSPEND_FLAGS</code> points, also in a tight loop. The watchdog is always
 cancelled and joined before <code>Instance::call</code> returns: after a normal return, a trap, an exhausted budget
-or a host error. A test runs many short calls with a deadline and checks that no thread is left. There is no
-fallback that reads the metering counter, because WAMR keeps it in a local of the interpreter loop.</p>
+or a host error. The watchdog decides to fire, and records that it fired, under its lock; the call stops and joins
+it before it reads the exception. When the watchdog fired after the guest returned, the call keeps its results and
+clears the exception, so the next call does not see the termination. A test delays the stop of the watchdog after
+the return to make this race certain. Each watchdog thread counts itself at its start and at its end, so a test
+that finds the count above 0 after the calls finds a thread that was not joined. There is no fallback that reads
+the metering counter, because WAMR keeps it in a local of the interpreter loop.</p>
+<p>The host functions of an instance have a range of ids in a table in the MoonBit stub. The table refers to no
+instance: the trampoline gives the host function its calling instance. The finalizer of an instance records its
+range as freed, and the next instantiation removes those entries, so loaded and dropped plugins do not stay in
+memory. Each instance holds a reference on its module in the C stub, so WAMR unloads the module after its last
+instance.</p>
 <p>Where the stub cannot start a thread, or where <code>THREAD_MGR</code> is not viable on a platform, the bounds
 report gives interruption as not enforced by the engine, and only the instruction budget bounds a call there. The
 Morphir host still ends its worker process at its own deadline.</p>

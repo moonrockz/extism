@@ -10,7 +10,13 @@
  *   environment, so a kernel call does not cross into MoonBit and does not count against the budget).
  * - A call can have an instruction budget (wasm_runtime_set_instruction_count_limit) and a deadline: a
  *   watchdog thread calls wasm_runtime_terminate when the deadline passes. The watchdog is always
- *   cancelled and joined before extism_wamr_call returns.
+ *   cancelled and joined before extism_wamr_call returns, and before the call reads the exception. When
+ *   the watchdog fired after the guest returned, the call clears the exception, so the next call does
+ *   not see it.
+ * - The host functions of an instance have a range of ids in the MoonBit host table. The instance
+ *   finalizer records the range as freed, and MoonBit removes those entries, so the table holds the
+ *   functions of live instances only. A host function gets its calling instance as an argument.
+ * - An instance holds a reference on its module, so the module is unloaded after its instances.
  * - The enlarge-memory error callback records a refused memory.grow on the instance.
  * - The stub maps the WAMR exception text to a status code, so MoonBit code never reads messages.
  */
@@ -48,7 +54,7 @@ enum { EXTISM_BINDING_NONE = 0, EXTISM_BINDING_HOST = 1, EXTISM_BINDING_EXPORT =
 /* The exception that a failed host function sets on its calling instance. */
 static const char host_failure[] = "moonrockz-extism: host function failed";
 
-typedef int32_t (*host_callback_t)(int32_t host_id, uint64_t cells);
+typedef int32_t (*host_callback_t)(int32_t host_id, uint64_t cells, uint64_t caller);
 
 typedef struct InstanceData InstanceData;
 
@@ -60,6 +66,8 @@ typedef struct {
   wasm_function_inst_t function;
 } Binding;
 
+typedef struct InstanceObject InstanceObject;
+
 struct InstanceData {
   wasm_module_inst_t instance;
   wasm_exec_env_t env;
@@ -67,6 +75,11 @@ struct InstanceData {
   Binding *bindings;
   int32_t grow_refused;
   int32_t host_failed;
+  /* The range of ids of the instance's host functions in the MoonBit host table. */
+  int32_t host_first;
+  int32_t host_count;
+  /* The object of the instance, which a host function gets as its caller; not a reference. */
+  InstanceObject *object;
 };
 
 typedef struct {
@@ -74,9 +87,11 @@ typedef struct {
   uint8_t *bytes;
 } ModuleObject;
 
-typedef struct {
+struct InstanceObject {
   InstanceData *data;
-} InstanceObject;
+  /* A reference on the module, so that the module outlives the instance. */
+  ModuleObject *module;
+};
 
 static int initialized = 0;
 static host_callback_t host_callback = NULL;
@@ -271,10 +286,12 @@ extism_wamr_module_ok(ModuleObject *object)
 /* ---- Linkers and instances ---- */
 
 uint64_t
-extism_wamr_linker_new(int32_t count)
+extism_wamr_linker_new(int32_t count, int32_t host_first, int32_t host_count)
 {
   InstanceData *data = (InstanceData *)calloc(1, sizeof(InstanceData));
   data->count = count;
+  data->host_first = host_first;
+  data->host_count = host_count;
   data->bindings = (Binding *)calloc(count > 0 ? (size_t)count : 1, sizeof(Binding));
   return (uint64_t)(uintptr_t)data;
 }
@@ -306,9 +323,43 @@ extism_wamr_linker_export(uint64_t linker, int32_t index, int32_t symbol, Instan
   return 1;
 }
 
+/* ---- Freed host id ranges ----
+ *
+ * free_data records the host id range of each instance that it frees, and MoonBit takes the ranges
+ * and removes the entries. Finalizers run on the thread of the MoonBit program, as calls do. */
+
+static int64_t *freed = NULL;
+static int32_t freed_count = 0;
+static int32_t freed_capacity = 0;
+
+static void
+record_freed(int32_t first, int32_t count)
+{
+  if (count <= 0) {
+    return;
+  }
+  if (freed_count == freed_capacity) {
+    freed_capacity = freed_capacity ? freed_capacity * 2 : 64;
+    freed = (int64_t *)realloc(freed, sizeof(int64_t) * (size_t)freed_capacity);
+  }
+  freed[freed_count++] = ((int64_t)first << 32) | (int64_t)(uint32_t)count;
+}
+
+/* One freed range, as the first id in the high 32 bits and the count in the low 32 bits, or -1 when
+   no range is left. */
+int64_t
+extism_wamr_take_freed(void)
+{
+  if (freed_count == 0) {
+    return -1;
+  }
+  return freed[--freed_count];
+}
+
 static void
 free_data(InstanceData *data)
 {
+  record_freed(data->host_first, data->host_count);
   if (data->env) {
     wasm_runtime_destroy_exec_env(data->env);
   }
@@ -325,6 +376,12 @@ finalize_instance(void *self)
   InstanceObject *object = (InstanceObject *)self;
   if (object->data) {
     free_data(object->data);
+    object->data = NULL;
+  }
+  /* The module goes after the instance: WAMR's instance points into the module. */
+  if (object->module) {
+    moonbit_decref(object->module);
+    object->module = NULL;
   }
 }
 
@@ -335,7 +392,10 @@ extism_wamr_instantiate(ModuleObject *module, uint64_t linker, int32_t max_pages
   InstanceObject *object =
     (InstanceObject *)moonbit_make_external_object(finalize_instance, sizeof(InstanceObject));
   object->data = NULL;
+  moonbit_incref(module);
+  object->module = module;
   InstanceData *data = (InstanceData *)(uintptr_t)linker;
+  data->object = object;
   struct InstantiationArgs2 *args = NULL;
   if (!wasm_runtime_instantiation_args_create(&args)) {
     write_error(error, "cannot make the instantiation arguments");
@@ -425,44 +485,68 @@ status_of(const char *exception)
   return EXTISM_STATUS_TRAP_OTHER;
 }
 
-/* Calls `function` of `data` with one 64-bit cell per parameter and writes the results into the
-   cells. Gives a status code. */
-static int32_t
-call_cells(InstanceData *data, wasm_exec_env_t env, wasm_function_inst_t function, uint64_t *cells)
+/* The argument cells of `function`, packed as WAMR's argv, and the result types. Gives 0 when the
+   function has more than 16 parameters or results. */
+typedef struct {
+  uint32_t argv[32];
+  uint32_t used;
+  uint32_t results;
+  wasm_valkind_t result_types[16];
+} Frame;
+
+static int
+frame_of(InstanceData *data, wasm_function_inst_t function, const uint64_t *cells, Frame *frame)
 {
   uint32_t params = wasm_func_get_param_count(function, data->instance);
-  uint32_t results = wasm_func_get_result_count(function, data->instance);
-  wasm_valkind_t param_types[16];
-  wasm_valkind_t result_types[16];
-  if (params > 16 || results > 16) {
-    return EXTISM_STATUS_ARITY;
+  frame->results = wasm_func_get_result_count(function, data->instance);
+  if (params > 16 || frame->results > 16) {
+    return 0;
   }
+  wasm_valkind_t param_types[16];
   wasm_func_get_param_types(function, data->instance, param_types);
-  wasm_func_get_result_types(function, data->instance, result_types);
-  uint32_t argv[32];
-  uint32_t used = 0;
+  wasm_func_get_result_types(function, data->instance, frame->result_types);
+  frame->used = 0;
   for (uint32_t i = 0; i < params; i++) {
     if (param_types[i] == WASM_I64 || param_types[i] == WASM_F64) {
-      memcpy(&argv[used], &cells[i], sizeof(uint64_t));
-      used += 2;
+      memcpy(&frame->argv[frame->used], &cells[i], sizeof(uint64_t));
+      frame->used += 2;
     }
     else {
-      argv[used++] = (uint32_t)cells[i];
+      frame->argv[frame->used++] = (uint32_t)cells[i];
     }
   }
-  if (!wasm_runtime_call_wasm(env, function, used, argv)) {
-    return status_of(wasm_runtime_get_exception(data->instance));
-  }
+  return 1;
+}
+
+/* Writes the results of a call that returned into the cells. */
+static void
+results_of(const Frame *frame, uint64_t *cells)
+{
   uint32_t at = 0;
-  for (uint32_t i = 0; i < results; i++) {
-    if (result_types[i] == WASM_I64 || result_types[i] == WASM_F64) {
-      memcpy(&cells[i], &argv[at], sizeof(uint64_t));
+  for (uint32_t i = 0; i < frame->results; i++) {
+    if (frame->result_types[i] == WASM_I64 || frame->result_types[i] == WASM_F64) {
+      memcpy(&cells[i], &frame->argv[at], sizeof(uint64_t));
       at += 2;
     }
     else {
-      cells[i] = argv[at++];
+      cells[i] = frame->argv[at++];
     }
   }
+}
+
+/* Calls `function` of `data` with one 64-bit cell per parameter and writes the results into the
+   cells. Gives a status code. No watchdog watches this call. */
+static int32_t
+call_cells(InstanceData *data, wasm_exec_env_t env, wasm_function_inst_t function, uint64_t *cells)
+{
+  Frame frame;
+  if (!frame_of(data, function, cells, &frame)) {
+    return EXTISM_STATUS_ARITY;
+  }
+  if (!wasm_runtime_call_wasm(env, function, frame.used, frame.argv)) {
+    return status_of(wasm_runtime_get_exception(data->instance));
+  }
+  results_of(&frame, cells);
   return EXTISM_STATUS_OK;
 }
 
@@ -484,7 +568,10 @@ trampoline(wasm_exec_env_t env, uint64_t *args)
     return;
   }
   if (binding->kind == EXTISM_BINDING_HOST) {
-    if (!host_callback || host_callback(binding->host_id, (uint64_t)(uintptr_t)args) != 0) {
+    if (!host_callback
+        || host_callback(binding->host_id, (uint64_t)(uintptr_t)args,
+                         (uint64_t)(uintptr_t)data->object)
+             != 0) {
       data->host_failed = 1;
       wasm_runtime_set_exception(instance, host_failure);
     }
@@ -499,14 +586,30 @@ trampoline(wasm_exec_env_t env, uint64_t *args)
   }
 }
 
+/* The caller object of a host function, as a new reference for MoonBit. */
+InstanceObject *
+extism_wamr_caller(uint64_t caller)
+{
+  InstanceObject *object = (InstanceObject *)(uintptr_t)caller;
+  moonbit_incref(object);
+  return object;
+}
+
 /* ---- The deadline watchdog ----
  *
  * A watchdog thread waits for the end of the call up to the deadline, and calls wasm_runtime_terminate
- * when the deadline passes. The call always stops and joins it before it returns. Windows uses Win32
- * primitives directly: WAMR's Windows thread layer shares one wait semaphore per thread between its
- * condition variables and its joins, and keeps the record of each thread that ends. */
+ * when the deadline passes. The decision and `fired` are made under the watchdog's lock, so a call
+ * that stops the watchdog knows whether it fired. The call always stops and joins it before it reads
+ * the exception and before it returns. Windows uses Win32 primitives directly: WAMR's Windows thread
+ * layer shares one wait semaphore per thread between its condition variables and its joins, and keeps
+ * the record of each thread that ends. */
 
-static int32_t live_watchdogs = 0;
+/* The number of watchdog threads inside watch(), counted by the threads themselves: a thread that is
+   not joined is still counted. */
+static volatile int32_t running_watchdogs = 0;
+
+/* A delay between the end of the guest's call and the stop of the watchdog, for the race test only. */
+static int32_t stop_delay_us = 0;
 
 /* The stack of a watchdog thread: more than PTHREAD_STACK_MIN on every platform (128 KiB on aarch64
    Linux), or WAMR does not start the thread. */
@@ -514,9 +617,24 @@ static int32_t live_watchdogs = 0;
 
 #if defined(_WIN32)
 
+static void
+count_running(int32_t delta)
+{
+  InterlockedExchangeAdd((volatile LONG *)&running_watchdogs, (LONG)delta);
+}
+
+static int32_t
+load_running(void)
+{
+  return (int32_t)InterlockedCompareExchange((volatile LONG *)&running_watchdogs, 0, 0);
+}
+
 typedef struct {
+  CRITICAL_SECTION lock;
   HANDLE done;
   DWORD milliseconds;
+  int finished;
+  int fired;
   wasm_module_inst_t instance;
   HANDLE thread;
 } Watchdog;
@@ -524,45 +642,85 @@ typedef struct {
 static DWORD WINAPI
 watch(LPVOID arg)
 {
+  count_running(1);
   Watchdog *watchdog = (Watchdog *)arg;
   if (WaitForSingleObject(watchdog->done, watchdog->milliseconds) == WAIT_TIMEOUT) {
-    wasm_runtime_terminate(watchdog->instance);
+    EnterCriticalSection(&watchdog->lock);
+    if (!watchdog->finished) {
+      watchdog->fired = 1;
+      if (watchdog->instance) {
+        wasm_runtime_terminate(watchdog->instance);
+      }
+    }
+    LeaveCriticalSection(&watchdog->lock);
   }
+  count_running(-1);
   return 0;
 }
 
 static int
 watchdog_start(Watchdog *watchdog, int32_t deadline_ms, wasm_module_inst_t instance)
 {
+  memset(watchdog, 0, sizeof(*watchdog));
   watchdog->milliseconds = (DWORD)deadline_ms;
   watchdog->instance = instance;
+  InitializeCriticalSection(&watchdog->lock);
   watchdog->done = CreateEventW(NULL, TRUE, FALSE, NULL);
   if (!watchdog->done) {
+    DeleteCriticalSection(&watchdog->lock);
     return 0;
   }
   watchdog->thread = CreateThread(NULL, watchdog_stack, watch, watchdog, 0, NULL);
   if (!watchdog->thread) {
     CloseHandle(watchdog->done);
+    DeleteCriticalSection(&watchdog->lock);
     return 0;
   }
   return 1;
 }
 
-static void
+/* Stops and joins the watchdog; gives whether it fired. */
+static int
 watchdog_stop(Watchdog *watchdog)
 {
+  EnterCriticalSection(&watchdog->lock);
+  watchdog->finished = 1;
+  LeaveCriticalSection(&watchdog->lock);
   SetEvent(watchdog->done);
   WaitForSingleObject(watchdog->thread, INFINITE);
   CloseHandle(watchdog->thread);
   CloseHandle(watchdog->done);
+  DeleteCriticalSection(&watchdog->lock);
+  return watchdog->fired;
+}
+
+static void
+delay_stop(void)
+{
+  if (stop_delay_us > 0) {
+    Sleep((DWORD)((stop_delay_us + 999) / 1000));
+  }
 }
 
 #else
+
+static void
+count_running(int32_t delta)
+{
+  __atomic_fetch_add(&running_watchdogs, delta, __ATOMIC_SEQ_CST);
+}
+
+static int32_t
+load_running(void)
+{
+  return __atomic_load_n(&running_watchdogs, __ATOMIC_SEQ_CST);
+}
 
 typedef struct {
   korp_mutex lock;
   korp_cond done;
   int finished;
+  int fired;
   uint64_t microseconds;
   wasm_module_inst_t instance;
   korp_tid thread;
@@ -571,19 +729,24 @@ typedef struct {
 static void *
 watch(void *arg)
 {
+  count_running(1);
   Watchdog *watchdog = (Watchdog *)arg;
   uint64_t start = os_time_get_boot_us();
   os_mutex_lock(&watchdog->lock);
   while (!watchdog->finished) {
     uint64_t now = os_time_get_boot_us();
     if (now - start >= watchdog->microseconds) {
-      wasm_runtime_terminate(watchdog->instance);
+      watchdog->fired = 1;
+      if (watchdog->instance) {
+        wasm_runtime_terminate(watchdog->instance);
+      }
       break;
     }
     os_cond_reltimedwait(&watchdog->done, &watchdog->lock,
                          watchdog->microseconds - (now - start));
   }
   os_mutex_unlock(&watchdog->lock);
+  count_running(-1);
   return NULL;
 }
 
@@ -608,7 +771,8 @@ watchdog_start(Watchdog *watchdog, int32_t deadline_ms, wasm_module_inst_t insta
   return 1;
 }
 
-static void
+/* Stops and joins the watchdog; gives whether it fired. */
+static int
 watchdog_stop(Watchdog *watchdog)
 {
   os_mutex_lock(&watchdog->lock);
@@ -618,6 +782,15 @@ watchdog_stop(Watchdog *watchdog)
   os_thread_join(watchdog->thread, NULL);
   os_cond_destroy(&watchdog->done);
   os_mutex_destroy(&watchdog->lock);
+  return watchdog->fired;
+}
+
+static void
+delay_stop(void)
+{
+  if (stop_delay_us > 0) {
+    os_usleep((uint32_t)stop_delay_us);
+  }
 }
 
 #endif
@@ -625,7 +798,13 @@ watchdog_stop(Watchdog *watchdog)
 int32_t
 extism_wamr_live_watchdogs(void)
 {
-  return live_watchdogs;
+  return load_running();
+}
+
+void
+extism_wamr_test_stop_delay(int32_t microseconds)
+{
+  stop_delay_us = microseconds;
 }
 
 int32_t
@@ -639,20 +818,35 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
   if (!function) {
     return EXTISM_STATUS_UNKNOWN_EXPORT;
   }
+  Frame frame;
+  if (!frame_of(data, function, cells, &frame)) {
+    return EXTISM_STATUS_ARITY;
+  }
   data->host_failed = 0;
   wasm_runtime_set_instruction_count_limit(data->env, budget > 0 ? budget : -1);
   Watchdog watchdog;
   int watching = deadline_ms > 0 && deadline_supported
                  && watchdog_start(&watchdog, deadline_ms, data->instance);
+  int returned = wasm_runtime_call_wasm(data->env, function, frame.used, frame.argv);
+  int fired = 0;
   if (watching) {
-    live_watchdogs++;
+    delay_stop();
+    fired = watchdog_stop(&watchdog);
   }
-  int32_t status = call_cells(data, data->env, function, cells);
-  if (watching) {
-    watchdog_stop(&watchdog);
-    live_watchdogs--;
+  /* The watchdog is joined: nothing else writes the exception now. */
+  if (returned && !fired) {
+    results_of(&frame, cells);
+    return EXTISM_STATUS_OK;
   }
-  if (status != EXTISM_STATUS_OK && data->host_failed) {
+  if (returned && fired) {
+    /* The deadline passed after the guest returned: the call has its results, and the next call must
+       not see the termination. */
+    wasm_runtime_clear_exception(data->instance);
+    results_of(&frame, cells);
+    return EXTISM_STATUS_OK;
+  }
+  int32_t status = status_of(wasm_runtime_get_exception(data->instance));
+  if (data->host_failed) {
     status = EXTISM_STATUS_TRAP_HOST;
   }
   return status;
@@ -669,7 +863,7 @@ probe_watchdog(void)
   if (!watchdog_start(&watchdog, 60000, NULL)) {
     return 0;
   }
-  watchdog_stop(&watchdog);
+  (void)watchdog_stop(&watchdog);
   return 1;
 }
 
@@ -726,12 +920,20 @@ memory_range(InstanceObject *object, int64_t offset, int32_t length)
   return (uint8_t *)wasm_memory_get_base_address(memory) + offset;
 }
 
+/* Whether `length` bytes at `offset` are inside a MoonBit byte array of `capacity` bytes. The sum is
+   computed in 64 bits, so it does not overflow. */
+static int
+inside_bytes(int32_t offset, int32_t length, int32_t capacity)
+{
+  return offset >= 0 && length >= 0 && (int64_t)offset + (int64_t)length <= (int64_t)capacity;
+}
+
 int32_t
 extism_wamr_memory_read(InstanceObject *object, int64_t offset, moonbit_bytes_t out,
                         int32_t out_offset, int32_t length)
 {
   uint8_t *source = memory_range(object, offset, length);
-  if (!source || out_offset < 0 || out_offset + length > Moonbit_array_length(out)) {
+  if (!source || !inside_bytes(out_offset, length, Moonbit_array_length(out))) {
     return 0;
   }
   memcpy(out + out_offset, source, (size_t)length);
@@ -743,7 +945,7 @@ extism_wamr_memory_write(InstanceObject *object, int64_t offset, moonbit_bytes_t
                          int32_t bytes_offset, int32_t length)
 {
   uint8_t *target = memory_range(object, offset, length);
-  if (!target || bytes_offset < 0 || bytes_offset + length > Moonbit_array_length(bytes)) {
+  if (!target || !inside_bytes(bytes_offset, length, Moonbit_array_length(bytes))) {
     return 0;
   }
   memcpy(target, bytes + bytes_offset, (size_t)length);

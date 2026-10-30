@@ -7,7 +7,9 @@ type ModuleHandle
 type InstanceHandle
 
 ///|
-extern "C" fn wamr_init(callback : FuncRef[(Int32, UInt64) -> Int32]) -> Int32 = "extism_wamr_init"
+extern "C" fn wamr_init(
+  callback : FuncRef[(Int32, UInt64, UInt64) -> Int32],
+) -> Int32 = "extism_wamr_init"
 
 ///|
 #borrow(module_, field)
@@ -22,7 +24,19 @@ extern "C" fn wamr_load(wasm : Bytes, error : Bytes) -> ModuleHandle = "extism_w
 extern "C" fn wamr_module_ok(module_ : ModuleHandle) -> Int32 = "extism_wamr_module_ok"
 
 ///|
-extern "C" fn wamr_linker_new(count : Int32) -> UInt64 = "extism_wamr_linker_new"
+extern "C" fn wamr_linker_new(
+  count : Int32,
+  host_first : Int32,
+  host_count : Int32,
+) -> UInt64 = "extism_wamr_linker_new"
+
+///|
+/// The calling instance of a host function, from the pointer that the trampoline gives.
+extern "C" fn wamr_caller(caller : UInt64) -> InstanceHandle = "extism_wamr_caller"
+
+///|
+extern "C" fn wamr_take_freed() -> Int64 = "extism_wamr_take_freed"
+
 
 ///|
 extern "C" fn wamr_linker_host(
@@ -107,16 +121,20 @@ extern "C" fn wamr_live_watchdogs() -> Int32 = "extism_wamr_live_watchdogs"
 extern "C" fn wamr_deadline_supported() -> Int32 = "extism_wamr_deadline_supported"
 
 ///|
-/// The number of deadline watchdog threads that run now. After every call it is 0.
+/// The number of deadline watchdog threads that run now, as the threads count themselves: a thread
+/// that a call did not join is counted. After every call it is 0.
 pub fn live_watchdogs() -> Int32 {
   wamr_live_watchdogs()
 }
 
 ///|
+/// The host functions of an instance's imports. The table refers to no instance: a host function gets
+/// its calling instance from the trampoline, so a dropped instance is freed, and its entries go.
 priv struct HostEntry {
   signature : Signature
   function : (Caller, Array[Value]) -> Array[Value] raise HostError
-  caller : Caller
+  /// Whether the instance has a memory, for `Caller::memory`.
+  has_memory : Bool
 }
 
 ///|
@@ -150,12 +168,36 @@ fn from_cell(type_ : ValueType, cell : UInt64) -> Value {
 }
 
 ///|
-fn dispatch(host_id : Int32, cells : UInt64) -> Int32 {
+/// Removes the entries of the instances that the finalizer freed.
+fn release_freed() -> Unit {
+  while wamr_take_freed() is range && range >= 0L {
+    let first = (range >> 32).to_int()
+    let count = (range & 0xffffffffL).to_int()
+    for id in first..<(first + count) {
+      host_entries.remove(id)
+    }
+  }
+}
+
+///|
+/// The number of entries in the host function table, after the entries of freed instances go.
+pub fn host_entry_count() -> Int {
+  release_freed()
+  host_entries.length()
+}
+
+///|
+fn dispatch(host_id : Int32, cells : UInt64, caller : UInt64) -> Int32 {
   guard host_entries.get(host_id) is Some(entry) else { return 1 }
   let args = entry.signature.params.mapi((i, t) => {
     from_cell(t, wamr_cell_get(cells, i))
   })
-  let results = (entry.function)(entry.caller, args) catch {
+  let memory : Memory? = if entry.has_memory {
+    Some({ handle: wamr_caller(caller) })
+  } else {
+    None
+  }
+  let results = (entry.function)({ memory, }, args) catch {
     error => {
       last_host_error.val = Some(error)
       return 1
@@ -183,7 +225,10 @@ let initialized : Ref[Bool] = Ref(false)
 ///|
 fn ensure_init() -> Unit {
   if !initialized.val {
-    guard wamr_init(fn(host_id, cells) { dispatch(host_id, cells) }) == 1 else {
+    guard wamr_init(fn(host_id, cells, caller) {
+        dispatch(host_id, cells, caller)
+      }) ==
+      1 else {
       abort("moonrockz/extism: the WAMR runtime cannot start")
     }
     initialized.val = true
@@ -236,25 +281,27 @@ let stack_size : Int32 = 1024 * 1024
 ///|
 fn backend_instantiate(
   module_ : ModuleHandle,
-  _parsed : @binary.Module,
+  parsed : @binary.Module,
   bindings : Array[(String, String, Binding)],
   ceiling : Int32,
-  caller : Ref[Instance?],
+  _caller : Ref[Instance?],
 ) -> InstanceHandle raise EngineError {
-  let linker = wamr_linker_new(bindings.length())
+  release_freed()
+  // The instance's host functions take a range of ids, which the finalizer of the instance frees.
+  let host_first = next_host_id.val
+  let host_count = bindings.iter().filter(b => b.2 is Host(_, _)).count()
+  next_host_id.val += host_count
+  let has_memory = parsed.memory() is Some(_)
+  let linker = wamr_linker_new(bindings.length(), host_first, host_count)
+  let mut id = host_first
   for index, binding in bindings {
     let (module_name, name, kind) = binding
     let symbol = wamr_register(@utf8.encode(module_name), @utf8.encode(name))
     match kind {
       Host(signature, function) => {
-        let id = next_host_id.val
-        next_host_id.val += 1
-        host_entries[id] = {
-          signature,
-          function,
-          caller: { instance: caller, },
-        }
+        host_entries[id] = { signature, function, has_memory }
         wamr_linker_host(linker, index, symbol, id)
+        id += 1
       }
       Export(function) => {
         let found = wamr_linker_export(

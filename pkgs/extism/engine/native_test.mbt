@@ -103,3 +103,40 @@ test "Start function under a budget on native: a start that loops forever stops 
   }
   assert_true(error is Start(BudgetExhausted))
 }
+
+///|
+test "Watchdog race: calls that end just inside the deadline leave no interruption for the next call" {
+  let module_ = compile(@fixtures.spin_n())
+  // Calibrate the iterations per millisecond of this machine.
+  let probe = module_.instantiate(@engine.Imports::new())
+  let calibration = 20000000
+  let begin = @env.now()
+  probe.call("spin_n", [I32(calibration)]) |> ignore
+  let elapsed = @cmp.maximum((@env.now() - begin).to_int(), 1)
+  let per_ms = @cmp.maximum(calibration / elapsed, 1)
+  let deadline = @engine.Deadline::parse(2)
+  let mut finished = 0
+  let mut interrupted = 0
+  for k in 0..<600 {
+    // From 1.6 ms to 2.4 ms of work, around the deadline of 2 ms.
+    let n = per_ms * 2 * (80 + k % 41) / 100
+    let instance = module_.instantiate(@engine.Imports::new())
+    let ended = try instance.call("spin_n", [I32(n)], deadline~) catch {
+      Interrupted => false
+      error => fail("unexpected error: \{@debug.to_string(error)}")
+    } noraise {
+      _ => true
+    }
+    if ended {
+      finished += 1
+      // The watchdog can fire after the guest returns; the next call must not see it.
+      assert_eq(instance.call("one", []), [I32(1)])
+      assert_eq(instance.call("one", [], deadline~), [I32(1)])
+    } else {
+      interrupted += 1
+    }
+  }
+  assert_true(finished > 0)
+  assert_eq(@engine.live_watchdogs(), 0)
+  ignore(interrupted)
+}

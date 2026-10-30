@@ -420,7 +420,7 @@ pub fn Instance::export_function(self : Instance, name : String) -> Function? {
 /// The memory of the instance, or `None` when it has none.
 pub fn Instance::memory(self : Instance) -> Memory? {
   match self.module_.parsed.memory() {
-    Some(_) => Some({ instance: self, })
+    Some(_) => Some({ handle: self.handle })
     None => None
   }
 }
@@ -441,28 +441,25 @@ pub fn Function::signature(self : Function) -> Signature {
 ///|
 /// The instance whose host function a guest calls.
 pub struct Caller {
-  priv instance : Ref[Instance?]
+  priv memory : Memory?
 }
 
 ///|
 /// The memory of the calling instance, or `None` when it has none.
 pub fn Caller::memory(self : Caller) -> Memory? {
-  match self.instance.val {
-    Some(instance) => instance.memory()
-    None => None
-  }
+  self.memory
 }
 
 ///|
 /// The linear memory of an instance.
 pub struct Memory {
-  priv instance : Instance
+  priv handle : InstanceHandle
 }
 
 ///|
 /// The size of the memory in bytes.
 pub fn Memory::size(self : Memory) -> Int64 {
-  backend_memory_size(self.instance.handle)
+  backend_memory_size(self.handle)
 }
 
 ///|
@@ -476,7 +473,7 @@ pub fn Memory::read(
   guard length >= 0 && offset >= 0L && offset + length.to_int64() <= self.size() else {
     raise OutOfBounds(offset, length)
   }
-  backend_memory_read(self.instance.handle, offset, length)
+  backend_memory_read(self.handle, offset, length)
 }
 
 ///|
@@ -489,7 +486,7 @@ pub fn Memory::write(
   guard offset >= 0L && offset + bytes.length().to_int64() <= self.size() else {
     raise OutOfBounds(offset, bytes.length())
   }
-  backend_memory_write(self.instance.handle, offset, bytes)
+  backend_memory_write(self.handle, offset, bytes)
 }
 
 ///|

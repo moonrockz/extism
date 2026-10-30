@@ -7,6 +7,8 @@ import {
 }
 
 // Values
+pub fn host_entry_count() -> Int32
+
 pub fn live_watchdogs() -> Int32
 
 // Errors

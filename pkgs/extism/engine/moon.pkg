@@ -21,6 +21,10 @@ import {
   "moonbitlang/core/env",
 } for "test"
 
+import {
+  "moonrockz/extism/internal/fixtures",
+} for "wbtest"
+
 options(
   // The engine stub, then one translation unit per WAMR source (scripts/vendor-wamr.mbtx writes
   // them and lists them in wamr/UPSTREAM.md). They need no include path and no define.
@@ -71,6 +75,7 @@ options(
   targets: {
     "native.mbt": [ "native" ],
     "native_test.mbt": [ "native" ],
+    "native_wbtest.mbt": [ "native" ],
     "js.mbt": [ "js" ],
     "js_test.mbt": [ "js" ],
   },

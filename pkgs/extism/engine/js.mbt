@@ -199,11 +199,15 @@ let last_host_error : Ref[HostError?] = Ref(None)
 fn host_function(
   signature : Signature,
   function : (Caller, Array[Value]) -> Array[Value] raise HostError,
-  caller : Caller,
+  caller : Ref[Instance?],
 ) -> JsValue {
   js_host(args => {
     let values = signature.params.mapi((i, t) => get_value(args, i, t))
-    let results = function(caller, values) catch {
+    let memory = match caller.val {
+      Some(instance) => instance.memory()
+      None => None
+    }
+    let results = function({ memory, }, values) catch {
       error => {
         last_host_error.val = Some(error)
         return js_null()
@@ -277,7 +281,7 @@ fn backend_instantiate(
     let (module_name, name, kind) = binding
     let value = match kind {
       Host(signature, function) =>
-        host_function(signature, function, { instance: caller, })
+        host_function(signature, function, caller)
       Export(function) =>
         js_export(function.instance.handle.instance, function.name)
     }
