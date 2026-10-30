@@ -277,3 +277,110 @@ pub fn simd_probe() -> Bytes {
     "0061736d01000000010e0360017f017f6000017f6000017c0304030001020503010001072804066d656d6f72790200056c616e657300000b73687566666c655f73756d000105666c6f617400020a8201031e002000fd11fd0c01000000020000000300000004000000fdb501fd1b020b3b004110fd0c000102030405060708090a0b0c0d0e0ffd0b04004110fd0004004110fd000400fd0d0f0e0d0c030201000000000000000000fd1b000b250044000000000000f83ffd14fd0c000000000000d03f0000000000000240fdf001fd21010b",
   )
 }
+
+///|
+/// ```wat
+/// (module
+///   (import "env" "seen" (func $seen))
+///   (memory 1)
+///   (global $count (mut i32) (i32.const 0))
+///   (func $start (call $seen) (global.set $count (i32.add (global.get $count) (i32.const 1))))
+///   (start $start)
+///   (func (export "count") (result i32) (global.get $count)))
+/// ```
+pub fn start_host() -> Bytes {
+  hex(
+    "0061736d010000000108026000006000017f020c0103656e76047365656e0000030302000105030100010606017f0141000b07090105636f756e7400020801010a12020b001000230041016a24000b040023000b001f046e616d65010e0200047365656e010573746172740708010005636f756e74",
+  )
+}
+
+///|
+/// ```wat
+/// (module (func $start unreachable) (start $start) (func (export "f")))
+/// ```
+pub fn start_trap() -> Bytes {
+  hex(
+    "0061736d010000000104016000000303020000070501016600010801000a08020300000b02000b000f046e616d6501080100057374617274",
+  )
+}
+
+///|
+/// ```wat
+/// (module
+///   (func $spin (loop $l (br $l)))
+///   (start $spin)
+///   (func (export "run") (result i32) (i32.const 0)))
+/// ```
+pub fn start_loop() -> Bytes {
+  hex(
+    "0061736d010000000108026000006000017f03030200010707010372756e00010801000a0e02070003400c000b0b040041000b0016046e616d6501070100047370696e030601000100016c",
+  )
+}
+
+///|
+/// ```wat
+/// (module
+///   (func (export "_initialize") (loop $l (br $l)))
+///   (func (export "run") (result i32) (i32.const 0)))
+/// ```
+pub fn init_loop() -> Bytes {
+  hex(
+    "0061736d010000000108026000006000017f03030200010715020b5f696e697469616c697a6500000372756e00010a0e02070003400c000b0b040041000b000d046e616d65030601000100016c",
+  )
+}
+
+///|
+/// A plugin whose `count` gives two digits: how often `__wasm_call_ctors` and `__post_instantiate`
+/// ran, then how often `_initialize` ran.
+/// ```wat
+/// (module
+///   (import "extism:host/env" "alloc" (func $alloc (param i64) (result i64)))
+///   (import "extism:host/env" "store_u8" (func $store_u8 (param i64 i32)))
+///   (import "extism:host/env" "output_set" (func $output_set (param i64 i64)))
+///   (global $ctors (mut i32) (i32.const 0))
+///   (global $inits (mut i32) (i32.const 0))
+///   (func (export "__wasm_call_ctors")
+///     (global.set $ctors (i32.add (global.get $ctors) (i32.const 1))))
+///   (func (export "__post_instantiate")
+///     (global.set $ctors (i32.add (global.get $ctors) (i32.const 1))))
+///   (func (export "_initialize")
+///     (global.set $inits (i32.add (global.get $inits) (i32.const 1))))
+///   (func (export "count") (result i32) (local $h i64)
+///     (local.set $h (call $alloc (i64.const 2)))
+///     (call $store_u8 (local.get $h) (i32.add (i32.const 48) (global.get $ctors)))
+///     (call $store_u8 (i64.add (local.get $h) (i64.const 1)) (i32.add (i32.const 48) (global.get $inits)))
+///     (call $output_set (local.get $h) (i64.const 2))
+///     (i32.const 0)))
+/// ```
+pub fn ctors() -> Bytes {
+  hex(
+    "0061736d0100000001170560017e017e60027e7f0060027e7e006000006000017f0251030f65787469736d3a686f73742f656e7605616c6c6f6300000f65787469736d3a686f73742f656e760873746f72655f753800010f65787469736d3a686f73742f656e760a6f75747075745f736574000203050403030304060b027f0141000b7f0141000b074004115f5f7761736d5f63616c6c5f63746f72730003125f5f706f73745f696e7374616e746961746500040b5f696e697469616c697a65000505636f756e7400060a47040900230041016a24000b0900230041016a24000b0900230141016a24010b2701017e4202100021002000413023006a1001200042017c413023016a100120004202100241000b003e046e616d65011e030005616c6c6f63010873746f72655f7538020a6f75747075745f7365740206010601000168070f02000563746f72730105696e697473",
+  )
+}
+
+///|
+/// The `ctors` plugin with a `__wasm_call_ctors` that takes an `i32`, and no `__post_instantiate`.
+pub fn ctors_wrong_type() -> Bytes {
+  hex(
+    "0061736d01000000011b0660017e017e60027e7f0060027e7e0060017f006000006000017f0251030f65787469736d3a686f73742f656e7605616c6c6f6300000f65787469736d3a686f73742f656e760873746f72655f753800010f65787469736d3a686f73742f656e760a6f75747075745f7365740002030403030405060b027f0141000b7f0141000b072b03115f5f7761736d5f63616c6c5f63746f727300030b5f696e697469616c697a65000405636f756e7400050a3d030900230041016a24000b0900230141016a24010b2701017e4202100021002000413023006a1001200042017c413023016a100120004202100241000b003e046e616d65011e030005616c6c6f63010873746f72655f7538020a6f75747075745f7365740206010501000168070f02000563746f72730105696e697473",
+  )
+}
+
+///|
+/// A WASI plugin that does not export its memory.
+/// ```wat
+/// (module
+///   (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+///   (memory 1)
+///   (data (i32.const 16) "hello")
+///   (func (export "print") (result i32)
+///     (i32.store (i32.const 0) (i32.const 16))
+///     (i32.store (i32.const 4) (i32.const 5))
+///     (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+///     (i32.const 0)))
+/// ```
+pub fn wasi_hidden_memory() -> Bytes {
+  hex(
+    "0061736d01000000010d0260047f7f7f7f017f6000017f02230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001070901057072696e7400010a1f011d004100411036020041044105360200410141004101410810001a41000b0b0b010041100b0568656c6c6f0012046e616d65010b01000866645f7772697465",
+  )
+}

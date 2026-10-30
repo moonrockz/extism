@@ -205,3 +205,42 @@ test "Multiple memories: two memories, or a memory index in a memarg, need multi
   let memarg = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x05\x03\x01\x00\x01\x0a\x0b\x01\x09\x00\x41\x00\x28\x42\x00\x00\x1a\x0b"
   assert_eq(@binary.Module::parse(memarg).features(), [MultiMemory])
 }
+
+///|
+test "prepare: the start function becomes an export, memory 0 is exported and the start section goes" {
+  let module_ = @binary.Module::parse(@fixtures.start_host())
+  assert_eq(module_.start, Some(1))
+  let prepared = @binary.Module::parse(module_.prepare())
+  assert_eq(prepared.start, None)
+  assert_false(prepared.sections.iter().any(s => s.id == 8))
+  assert_true(
+    prepared.exports.contains({ name: @binary.start_export, kind: Func, index: 1 }),
+  )
+  assert_true(
+    prepared.exports.contains({
+      name: @binary.memory_export,
+      kind: Memory,
+      index: 0,
+    }),
+  )
+  assert_eq(prepared.export_type("count"), module_.export_type("count"))
+  assert_eq(prepared.features(), [])
+}
+
+///|
+test "prepare: a module with no start and no memory is unchanged" {
+  let bytes = @fixtures.add()
+  assert_eq(@binary.Module::parse(bytes).prepare(), bytes)
+}
+
+///|
+test "prepare refuses a module that exports a reserved name" {
+  // (module (func (export "__moonrockz_extism_start")))
+  let bytes = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x07\x1c\x01\x18\x5f\x5f\x6d\x6f\x6f\x6e\x72\x6f\x63\x6b\x7a\x5f\x65\x78\x74\x69\x73\x6d\x5f\x73\x74\x61\x72\x74\x00\x00\x0a\x04\x01\x02\x00\x0b"
+  let refused = try @binary.Module::parse(bytes).prepare() catch {
+    DecodeError(_, _) => true
+  } noraise {
+    _ => false
+  }
+  assert_true(refused)
+}

@@ -6,6 +6,10 @@ pub fn add() -> Bytes
 
 pub fn big() -> Bytes
 
+pub fn ctors() -> Bytes
+
+pub fn ctors_wrong_type() -> Bytes
+
 pub fn fd_write_import() -> Bytes
 
 pub fn features() -> Bytes
@@ -13,6 +17,8 @@ pub fn features() -> Bytes
 pub fn grow() -> Bytes
 
 pub fn host() -> Bytes
+
+pub fn init_loop() -> Bytes
 
 pub fn init_trap() -> Bytes
 
@@ -24,9 +30,17 @@ pub fn simd() -> Bytes
 
 pub fn simd_probe() -> Bytes
 
+pub fn start_host() -> Bytes
+
+pub fn start_loop() -> Bytes
+
+pub fn start_trap() -> Bytes
+
 pub fn traps() -> Bytes
 
 pub fn unknown_import() -> Bytes
+
+pub fn wasi_hidden_memory() -> Bytes
 
 pub fn wasi_plugin() -> Bytes
 

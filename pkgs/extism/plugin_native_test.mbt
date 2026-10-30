@@ -15,3 +15,26 @@ test "limits on native: the budget stops a call, and the bounds are enforced" {
   }
   assert_true(error is Engine(BudgetExhausted))
 }
+
+///|
+test "Start-up under the deadline on native: an _initialize that loops forever stops" {
+  let limits = @extism.Limits::default()
+    .deadline(@engine.Deadline::parse(100))
+    .budget(@engine.Budget::parse(2147483647L))
+  let plugin = @extism.Plugin::load(
+    @extism.Manifest::new(@fixtures.init_loop()).limits(limits),
+  )
+  let error = call_error(plugin, "run", b"")
+  assert_true(error is Initialization(Interrupted))
+}
+
+///|
+test "Instantiation under the deadline on native: a start function that loops forever stops" {
+  let limits = @extism.Limits::default()
+    .deadline(@engine.Deadline::parse(100))
+    .budget(@engine.Budget::parse(2147483647L))
+  let error = load_error(
+    @extism.Manifest::new(@fixtures.start_loop()).limits(limits),
+  )
+  assert_true(error is Engine(Start(Interrupted)))
+}

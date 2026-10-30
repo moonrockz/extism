@@ -73,3 +73,33 @@ test "a budget large enough lets the call finish" {
   assert_eq(instance.call("add", [I64(1), I64(2)], budget~), [I64(3)])
   assert_eq(instance.call("add", [I64(1), I64(2)], budget~), [I64(3)])
 }
+
+///|
+test "Start function under a deadline on native: a start that loops forever stops at the deadline" {
+  let deadline = @engine.Deadline::parse(100)
+  let backstop = @engine.Budget::parse(2147483647L)
+  let module_ = compile(@fixtures.start_loop())
+  let start = @env.now()
+  let error = try
+    module_.instantiate(@engine.Imports::new(), deadline~, budget=backstop)
+  catch {
+    error => error
+  } noraise {
+    _ => fail("the instantiation must stop")
+  }
+  assert_true(error is Start(Interrupted))
+  assert_true(@env.now() - start < 1000UL)
+  assert_eq(@engine.live_watchdogs(), 0)
+}
+
+///|
+test "Start function under a budget on native: a start that loops forever stops at the budget" {
+  let module_ = compile(@fixtures.start_loop())
+  let budget = @engine.Budget::parse(100000L)
+  let error = try module_.instantiate(@engine.Imports::new(), budget~) catch {
+    error => error
+  } noraise {
+    _ => fail("the instantiation must stop")
+  }
+  assert_true(error is Start(BudgetExhausted))
+}

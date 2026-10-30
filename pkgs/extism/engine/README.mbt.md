@@ -7,7 +7,9 @@ of Node.js and browsers on js. It knows nothing of Extism.
 - `Engine::compile` reads the module, refuses a feature that the engine lacks with `FeatureUnsupported` and
   the feature name (from the same pure scan on both engines), and compiles it.
 - `Module::instantiate` binds each import to a MoonBit function or to an exported function of another
-  instance, per instance, with a memory ceiling in pages.
+  instance, per instance, with a memory ceiling in pages. The start function of the module runs after the
+  instance exists, as a call with the budget and the deadline of the instantiation; when it fails, the
+  instantiation fails with `Start`.
 - `Instance::call` calls an export with typed values, an instruction budget and a deadline.
 - `Instance::memory` reads and writes guest memory; it is also the WASI `GuestMemory`.
 
@@ -19,7 +21,8 @@ of Node.js and browsers on js. It knows nothing of Extism.
 | Refused `memory.grow` | `MemoryLimit` (enlarge-memory callback) | `MemoryLimit` (an appended grow function) |
 | Instruction budget | Enforced: WAMR metering, 1 to 2147483647 instructions | Not enforced |
 | Deadline | Enforced: a watchdog thread calls `wasm_runtime_terminate`; it is always joined | Not enforced: end the worker |
-| Features beyond the core set | None | `simd` |
+| Host work | Not metered: a host function and the kernel's forwarded calls count no instructions; the deadline bounds them | Not metered |
+| Features beyond the core set | `simd` (SIMDe headers) | `simd` |
 
 ```moonbit check
 ///|

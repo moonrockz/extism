@@ -470,6 +470,8 @@ pub fn Plugin::load(
   let instance = module_.instantiate(
     imports,
     memory_ceiling=manifest.limits.plugin_memory,
+    budget?=manifest.limits.budget,
+    deadline?=manifest.limits.deadline,
   ) catch {
     error => raise Engine(error)
   }
@@ -504,14 +506,25 @@ fn Plugin::export_is_unit(self : Plugin, name : String) -> Bool {
 
 ///|
 /// Starts the guest runtime once, as upstream Extism does: `_initialize` and `hs_init(0, 0)` for a
-/// Haskell module, else `__wasm_call_ctors`, else `_initialize`.
+/// Haskell module, else `__wasm_call_ctors`, else `_initialize`. A `__wasm_call_ctors` or an
+/// `_initialize` of another type than `() -> ()` is not called, and a `__wasm_call_ctors` of another
+/// type does not make `_initialize` run. Each call has the budget and the deadline of the limits. The
+/// engine runs no start-up export itself.
 fn Plugin::initialize(self : Plugin) -> Unit raise CallError {
   if self.initialized {
     return
   }
   self.initialized = true
   let run = (name : String, args : Array[@engine.Value]) => {
-    (self.instance.call(name, args) |> ignore) catch {
+    (
+      self.instance.call(
+        name,
+        args,
+        budget?=self.limits.budget,
+        deadline?=self.limits.deadline,
+      )
+      |> ignore
+    ) catch {
       error => raise Initialization(error)
     }
   }
@@ -520,8 +533,10 @@ fn Plugin::initialize(self : Plugin) -> Unit raise CallError {
       run("_initialize", [])
     }
     run("hs_init", [I32(0), I32(0)])
-  } else if self.export_is_unit("__wasm_call_ctors") {
-    run("__wasm_call_ctors", [])
+  } else if self.instance.has_function("__wasm_call_ctors") {
+    if self.export_is_unit("__wasm_call_ctors") {
+      run("__wasm_call_ctors", [])
+    }
   } else if self.export_is_unit("_initialize") {
     run("_initialize", [])
   }

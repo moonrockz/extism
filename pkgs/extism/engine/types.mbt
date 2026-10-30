@@ -295,6 +295,9 @@ pub suberror EngineError {
   LinkError(String, String)
   /// The memory ceiling is smaller than the initial pages: the ceiling and the initial pages.
   CeilingBelowInitial(Int32, Int32)
+  /// The start function of the module failed: a trap, an exhausted budget, an interruption, a memory
+  /// limit or a host error.
+  Start(CallError)
 } derive(Debug)
 
 ///|

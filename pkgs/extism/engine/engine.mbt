@@ -71,7 +71,15 @@ pub fn Engine::compile(
       "the module imports its memory; the engine gives each instance its own memory",
     )
   }
-  { parsed, handle: backend_compile(bytes, parsed), }
+  // Both engines compile the prepared module: its start function is an export that the instantiation
+  // calls with the bounds of the caller, and its memory is exported under a reserved name.
+  let (prepared_bytes, prepared) = (() => {
+    let prepared_bytes = parsed.prepare()
+    (prepared_bytes, @binary.Module::parse(prepared_bytes))
+  })() catch {
+    DecodeError(at, rule) => raise Invalid("byte \{at}: \{rule}")
+  }
+  { parsed, handle: backend_compile(prepared_bytes, prepared) }
 }
 
 ///|
@@ -241,11 +249,15 @@ pub struct Instance {
 
 ///|
 /// Instantiates the module with `imports` and a memory ceiling of `memory_ceiling` pages. A
-/// `memory.grow` past the ceiling returns -1 to the guest.
+/// `memory.grow` past the ceiling returns -1 to the guest. The start function of the module, if it
+/// has one, runs after the instance exists, as a call with `budget` and `deadline`; when it fails, the
+/// instantiation fails with `Start`.
 pub fn Module::instantiate(
   self : Module,
   imports : Imports,
   memory_ceiling~ : PageCount = PageCount::default_ceiling(),
+  budget? : Budget,
+  deadline? : Deadline,
 ) -> Instance raise EngineError {
   let ceiling = memory_ceiling.pages()
   if self.initial_pages() is Some(initial) && initial > ceiling {
@@ -274,6 +286,20 @@ pub fn Module::instantiate(
     linked,
   }
   caller.val = Some(instance)
+  if self.parsed.start is Some(_) {
+    (
+      instance.invoke(
+        @binary.start_export,
+        Signature::new([], []),
+        [],
+        budget,
+        deadline,
+      )
+      |> ignore
+    ) catch {
+      error => raise Start(error)
+    }
+  }
   instance
 }
 
@@ -314,6 +340,20 @@ pub fn Instance::call(
     )
   }
   check_arguments(name, signature, args)
+  self.invoke(name, signature, args, budget, deadline)
+}
+
+///|
+/// Calls the export `name` of the compiled module, which can be an export that the engine adds, and
+/// reads the refused grows of the call.
+fn Instance::invoke(
+  self : Instance,
+  name : String,
+  signature : Signature,
+  args : Array[Value],
+  budget : Budget?,
+  deadline : Deadline?,
+) -> Array[Value] raise CallError {
   // A refusal before this call stays recorded for `take_refused_grow`; this call reads its own.
   self.refused = self.refused || backend_take_refused_grow(self.handle)
   errdefer {

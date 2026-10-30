@@ -27,6 +27,7 @@ pub suberror EngineError {
   FeatureUnsupported(Feature)
   LinkError(String, String)
   CeilingBelowInitial(Int32, Int32)
+  Start(CallError)
 } derive(@debug.Debug)
 pub fn EngineError::to_repr(Self) -> @debug.Repr
 
@@ -179,7 +180,7 @@ pub struct Module {
 pub fn Module::exports(Self) -> Array[ExportDescriptor]
 pub fn Module::imports(Self) -> Array[ImportDescriptor]
 pub fn Module::initial_pages(Self) -> Int32?
-pub fn Module::instantiate(Self, Imports, memory_ceiling? : PageCount) -> Instance raise EngineError
+pub fn Module::instantiate(Self, Imports, memory_ceiling? : PageCount, budget? : Budget, deadline? : Deadline) -> Instance raise EngineError
 
 type ModuleHandle
 

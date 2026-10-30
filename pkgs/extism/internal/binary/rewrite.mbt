@@ -4,6 +4,20 @@
 pub let grow_flag_export : String = "__moonrockz_extism_grow_refused"
 
 ///|
+/// The prefix of the names that the rewrites export. A module that exports a name with this prefix is
+/// refused.
+pub let reserved_prefix : String = "__moonrockz_extism_"
+
+///|
+/// The export that `Module::prepare` gives the function of the start section.
+pub let start_export : String = "__moonrockz_extism_start"
+
+///|
+/// The export that `Module::prepare` gives memory 0, so that a host reaches the memory of a module
+/// that does not export it.
+pub let memory_export : String = "__moonrockz_extism_memory"
+
+///|
 fn write_unsigned(out : @buffer.Buffer, value : Int64) -> Unit {
   let mut rest = value
   while true {
@@ -81,6 +95,89 @@ fn encoded(write : (@buffer.Buffer) -> Unit) -> Bytes {
 }
 
 ///|
+/// One entry of the export section.
+fn export_entry(name : String, kind : Byte, index : Int32) -> Bytes {
+  encoded(out => {
+    let bytes = @utf8.encode(name)
+    write_unsigned(out, bytes.length().to_int64())
+    out.write_bytes(bytes)
+    out.write_byte(kind)
+    write_unsigned(out, index.to_int64())
+  })
+}
+
+///|
+/// The module bytes with the sections in `replaced` written in place of the old ones (or at their
+/// place in the order when the module has none), and the sections in `removed` left out.
+fn Module::write_sections(
+  self : Module,
+  replaced : Map[Int32, Bytes],
+  removed~ : Array[Int32] = [],
+) -> Bytes {
+  let out = @buffer.Buffer()
+  out.write_bytes(self.bytes[0:8].to_owned())
+  let written : Map[Int32, Bool] = Map([])
+  let emit_missing_before = (rank : Int32) => {
+    let ids = replaced.keys().collect()
+    ids.sort_by_key(id => section_rank(id))
+    for id in ids {
+      if section_rank(id) < rank && !written.contains(id) {
+        written[id] = true
+        write_section(out, id, replaced[id])
+      }
+    }
+  }
+  for section in self.sections {
+    let rank = section_rank(section.id)
+    if rank > 0 {
+      emit_missing_before(rank)
+    }
+    if rank > 0 && removed.contains(section.id) {
+      continue
+    }
+    if replaced.get(section.id) is Some(payload) && rank > 0 {
+      written[section.id] = true
+      write_section(out, section.id, payload)
+    } else {
+      write_section(
+        out,
+        section.id,
+        self.bytes[section.start:section.end].to_owned(),
+      )
+    }
+  }
+  emit_missing_before(100)
+  out.to_bytes()
+}
+
+///|
+/// The module for both engines, before an engine compiles it. The start section is removed and its
+/// function is exported as `start_export`, so that the engine runs it after the instance exists, as a
+/// call with the bounds of the caller. Memory 0 is exported as `memory_export`, so that the host
+/// reaches the memory of a module that does not export it. No index changes. A module that exports
+/// a name with `reserved_prefix` is refused.
+pub fn Module::prepare(self : Module) -> Bytes raise DecodeError {
+  if self.exports.iter().find_first(e => e.name.has_prefix(reserved_prefix))
+    is Some(export_) {
+    raise DecodeError(
+      0,
+      "the module exports \{export_.name}, a name that the engine reserves",
+    )
+  }
+  let extra = []
+  if self.start is Some(function) {
+    extra.push(export_entry(start_export, b'\x00', function))
+  }
+  if self.memory() is Some(_) {
+    extra.push(export_entry(memory_export, b'\x02', 0))
+  }
+  if extra.is_empty() {
+    return self.bytes
+  }
+  self.write_sections(Map([(7, append_entries(self, 7, extra))]), removed=[8])
+}
+
+///|
 /// The module for the js engine, with the maximum of its memory at most `ceiling` pages and each
 /// `memory.grow` of memory 0 sent through an appended function that sets the exported global
 /// `grow_flag_export` when the grow is refused. Appended types, functions and globals take the next
@@ -123,13 +220,7 @@ pub fn Module::for_js(
     ])
     replaced[6] = append_entries(self, 6, [b"\x7f\x01\x41\x00\x0b"])
     replaced[7] = append_entries(self, 7, [
-      encoded(out => {
-        let name = @utf8.encode(grow_flag_export)
-        write_unsigned(out, name.length().to_int64())
-        out.write_bytes(name)
-        out.write_byte(b'\x03')
-        write_unsigned(out, global_index.to_int64())
-      }),
+      export_entry(grow_flag_export, b'\x03', global_index),
     ])
     // The code section: each `memory.grow 0` becomes a call of the appended function.
     let hook = encoded(out => {
@@ -167,36 +258,5 @@ pub fn Module::for_js(
     code.write_bytes(hook)
     replaced[10] = code.to_bytes()
   }
-  // Write the sections in order, with the new ones at their place.
-  let out = @buffer.Buffer()
-  out.write_bytes(self.bytes[0:8].to_owned())
-  let written : Map[Int32, Bool] = Map([])
-  let emit_missing_before = (rank : Int32) => {
-    let ids = replaced.keys().collect()
-    ids.sort_by_key(id => section_rank(id))
-    for id in ids {
-      if section_rank(id) < rank && !written.contains(id) {
-        written[id] = true
-        write_section(out, id, replaced[id])
-      }
-    }
-  }
-  for section in self.sections {
-    let rank = section_rank(section.id)
-    if rank > 0 {
-      emit_missing_before(rank)
-    }
-    if replaced.get(section.id) is Some(payload) && section_rank(section.id) > 0 {
-      written[section.id] = true
-      write_section(out, section.id, payload)
-    } else {
-      write_section(
-        out,
-        section.id,
-        self.bytes[section.start:section.end].to_owned(),
-      )
-    }
-  }
-  emit_missing_before(100)
-  out.to_bytes()
+  self.write_sections(replaced)
 }

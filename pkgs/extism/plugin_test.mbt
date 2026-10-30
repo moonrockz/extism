@@ -419,3 +419,27 @@ test "handles are more than 0 and byte limits are from 0 to 2147483647" {
     },
   )
 }
+
+///|
+test "Constructors run once: __wasm_call_ctors once, and no _initialize, on each engine" {
+  let plugin = load(@extism.Manifest::new(@fixtures.ctors()))
+  assert_eq(call(plugin, "count", b""), b"10")
+  assert_eq(call(plugin, "count", b""), b"10")
+}
+
+///|
+test "A __wasm_call_ctors with another type: no start-up export runs, as upstream" {
+  let plugin = load(@extism.Manifest::new(@fixtures.ctors_wrong_type()))
+  assert_eq(call(plugin, "count", b""), b"00")
+}
+
+///|
+test "A plugin that does not export its memory prints through WASI on each engine" {
+  let out = []
+  let sandbox = @wasi.Sandbox::new().stdout(bytes => out.push(bytes.to_owned()))
+  let plugin = load(
+    @extism.Manifest::new(@fixtures.wasi_hidden_memory()).wasi(sandbox),
+  )
+  assert_eq(call(plugin, "print", b""), b"")
+  assert_eq(out, [b"hello"])
+}

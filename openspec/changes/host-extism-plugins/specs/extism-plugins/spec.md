@@ -74,16 +74,35 @@ memory limit error that names that memory.
 
 ### Requirement: Guest runtime initialization
 Before the first call of an instance, the library SHALL initialize the guest runtime once, as upstream Extism
-does: when the module exports `hs_init`, call `_initialize` if it is `() -> ()` and then `hs_init(0, 0)`; else
-call `__wasm_call_ctors` if it is `() -> ()`; else call `_initialize` if it is `() -> ()`.
+does: when the module exports `hs_init`, call `_initialize` if it is `() -> ()` and then `hs_init(0, 0)`; else,
+when the module exports `__wasm_call_ctors`, call it if it is `() -> ()`; else call `_initialize` if it is
+`() -> ()`. This SHALL be the only start-up call of these exports: the engine SHALL NOT call them.
 
 #### Scenario: WASI reactor
 - **WHEN** a plugin exports `_initialize` with the type `() -> ()` and no `hs_init` or `__wasm_call_ctors`
 - **THEN** `_initialize` runs one time, before the first call, and not before later calls
 
+#### Scenario: Constructors run once
+- **WHEN** a plugin exports `__wasm_call_ctors`, `__post_instantiate` and `_initialize`, each `() -> ()`
+- **THEN** on native and on js `__wasm_call_ctors` runs one time and the other two do not run
+
+#### Scenario: Constructors of another type
+- **WHEN** a plugin exports `__wasm_call_ctors` with a parameter, and `_initialize` with the type `() -> ()`
+- **THEN** neither runs, as upstream
+
 #### Scenario: Initialization traps
 - **WHEN** `_initialize` traps
 - **THEN** the first call fails with an initialization error that holds the trap kind
+
+### Requirement: Start-up bounds
+Each start-up call, and the start function of the module at load, SHALL run with the budget and the deadline of
+the limits.
+
+#### Scenario: Start-up under the deadline
+- **WHEN** a plugin's `_initialize` loops forever, or its start function loops forever, and the limits have a
+  deadline, on the native engine
+- **THEN** the first call fails with an initialization error, or the load fails with a start error, that holds
+  `Interrupted`
 
 ### Requirement: Function existence
 The plugin API SHALL tell an embedder whether the module exports a function with a given name, without calling

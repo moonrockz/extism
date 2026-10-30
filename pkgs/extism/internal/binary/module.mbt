@@ -157,6 +157,8 @@ pub struct Module {
   memories : Array[Limits]
   global_count : Int32
   exports : Array[Export]
+  /// The function of the start section, if the module has one.
+  start : Int32?
   data_segment_count : Int32
   priv bodies : Array[Body]
   priv features : Array[Feature]
@@ -259,6 +261,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
   let features = []
   let mut global_count = 0
   let mut data_segment_count = 0
+  let mut start_function = None
   while !reader.done() {
     let id = reader.byte()
     let size = reader.u32()
@@ -354,6 +357,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
           section.skip(body_size)
           bodies.push({ start: body_start, end: body_start + body_size, })
         }
+      8 => start_function = Some(section.u32())
       11 => data_segment_count = section.u32()
       13 => add_feature(features, ExceptionHandling)
       _ => ()
@@ -373,6 +377,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
     memories,
     global_count,
     exports,
+    start: start_function,
     data_segment_count,
     bodies,
     features,

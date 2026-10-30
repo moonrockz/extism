@@ -213,7 +213,7 @@ pub struct Signature { params : Array[ValueType]; results : Array[ValueType] }
 pub struct PageCount(..)     // PageCount::parse(Int) raise LimitError; 1 to 65536
 pub struct Budget(..)        // instructions per call, 1 to 2147483647 (the C int of WAMR)
 pub struct Deadline(..)      // milliseconds per call, more than 0
-pub enum Feature { Simd; Threads; Memory64; ExceptionHandling; Gc; TailCall; Unknown(String) }
+pub enum Feature { Simd; Threads; Memory64; ExceptionHandling; Gc; TailCall; MultiMemory; Unknown(String) }
 pub enum Bound { Enforced; NotEnforced }
 
 pub fn Feature::scan(Bytes) -&gt; Array[Feature] raise EngineError   // pure; both engines use it
@@ -223,7 +223,7 @@ pub fn Engine::bounds(self) -&gt; Bounds                     // memory, budget, 
 pub fn Engine::compile(self, Bytes) -&gt; Module raise EngineError
 pub fn Module::imports(self) -&gt; Array[ImportDescriptor]
 pub fn Module::exports(self) -&gt; Array[ExportDescriptor]
-pub fn Module::instantiate(self, Imports, memory_ceiling~ : PageCount) -&gt; Instance raise EngineError
+pub fn Module::instantiate(self, Imports, memory_ceiling~ : PageCount, budget? : Budget, deadline? : Deadline) -&gt; Instance raise EngineError
 pub fn Instance::call(self, String, Array[Value], budget? : Budget, deadline? : Deadline) -&gt; Array[Value] raise CallError
 pub fn Instance::memory(self) -&gt; Memory?                  // implements @wasi.GuestMemory
 pub fn Instance::export_function(self, String) -&gt; Function?</code></pre>
@@ -231,7 +231,7 @@ pub fn Instance::export_function(self, String) -&gt; Function?</code></pre>
 MoonBit closure (<code>(Caller, Array[Value]) -&gt; Array[Value] raise HostError</code>) or an exported
 <code>Function</code> of another instance. <code>Caller</code> gives the calling instance's memory. Errors are
 closed enums: <code>EngineError</code> (<code>Invalid</code>, <code>FeatureUnsupported(Feature)</code>,
-<code>LinkError</code>, <code>CeilingBelowInitial</code>) and <code>CallError</code> (<code>Trap(TrapKind)</code>,
+<code>LinkError</code>, <code>CeilingBelowInitial</code>, <code>Start(CallError)</code>) and <code>CallError</code> (<code>Trap(TrapKind)</code>,
 <code>BudgetExhausted</code>, <code>Interrupted</code>, <code>MemoryLimit</code>, <code>Host(HostError)</code>,
 <code>UnknownExport</code>). The engine does not know Extism.</p>
 <p>Imports are bound per instance. Two instances of one compiled module can have different closures and
@@ -242,6 +242,19 @@ the engine lacks fails with <code>FeatureUnsupported</code> and the feature name
 gives its set of supported features.</p>
 <p>A ceiling smaller than the initial pages of the module's memory is refused at instantiation with
 <code>CeilingBelowInitial</code>, which holds both page counts, on both engines.</p>
+<p><strong>The prepared module.</strong> Both engines compile the module after a pure rewrite,
+<code>@binary.Module::prepare</code>: it removes the start section and exports the start function under the
+reserved name <code>__moonrockz_extism_start</code>, and it exports memory 0 under the reserved name
+<code>__moonrockz_extism_memory</code>. No index changes. A module that exports a name with the prefix
+<code>__moonrockz_extism_</code> is refused. So no guest code runs inside the engine's instantiation: the
+instantiation makes the instance, sets the <code>Caller</code> of its host functions, and then calls the start
+function as a call with the <code>budget</code> and the <code>deadline</code> that the caller gives. A start
+function that fails makes the instantiation fail with <code>Start</code> and the call error. On js, the memory
+export lets the host reach the memory of a module that does not export <code>memory</code>, as on native. The
+exports that the rewrite adds are not in <code>Module::exports</code>.</p>
+<p>The engine meters guest instructions only. The work of a host function, for example a WASI call or an Extism
+host function, and the block walks of the kernel's forwarders on native, which run in another instance with no
+budget, count against no instruction budget; the deadline bounds them.</p>
 <p>A <code>memory.grow</code> that the ceiling refuses returns -1 to the guest, and the engine records the refusal
 for the current call. When a call then fails, the error is <code>MemoryLimit</code>, not the trap that followed.
 On native the record comes from WAMR's enlarge-memory error callback. On js the memory rewrite of
@@ -321,7 +334,8 @@ of the EXT-2 gate.</p>
 <code>extern "js"</code>, so it runs on Node.js and browsers with no package. js has no instruction metering and
 cannot stop a synchronous call on the same thread, so its bounds report gives the budget and interruption as not
 enforced. The memory ceiling is enforced by a pure MoonBit function that rewrites the memory section's maximum to
-the ceiling before compile, as finos/morphir-moonbit does today. Imported memories are refused. The same rewrite
+the ceiling before compile, as finos/morphir-moonbit does today. Imported memories are refused, and a second
+memory is the feature <code>multi-memory</code>, which both engines refuse with the same error. The same rewrite
 appends one function and one global to the module: each <code>memory.grow</code> in a function body calls the
 appended function, which runs <code>memory.grow</code> and sets the global when the result is -1. Appended
 functions and globals take the next free indices, so no other index changes. The engine reads and clears the

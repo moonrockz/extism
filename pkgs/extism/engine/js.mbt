@@ -127,21 +127,23 @@ extern "js" fn js_take_grow(instance : JsValue, flag : String) -> Bool =
   #|(i, f) => { const g = i.exports[f]; if (!g) return false; const v = g.value; g.value = 0; return v !== 0; }
 
 ///|
-extern "js" fn js_memory_size(instance : JsValue) -> Double = "(i) => i.exports.memory ? i.exports.memory.buffer.byteLength : 0"
+extern "js" fn js_memory_size(instance : JsValue, name : String) -> Double = "(i, m) => i.exports[m] ? i.exports[m].buffer.byteLength : 0"
 
 ///|
 extern "js" fn js_memory_read(
   instance : JsValue,
+  name : String,
   offset : Double,
   length : Int32,
-) -> Bytes = "(i, o, n) => new Uint8Array(i.exports.memory.buffer, o, n).slice()"
+) -> Bytes = "(i, m, o, n) => new Uint8Array(i.exports[m].buffer, o, n).slice()"
 
 ///|
 extern "js" fn js_memory_write(
   instance : JsValue,
+  name : String,
   offset : Double,
   bytes : Bytes,
-) = "(i, o, b) => { new Uint8Array(i.exports.memory.buffer).set(b, o); }"
+) = "(i, m, o, b) => { new Uint8Array(i.exports[m].buffer).set(b, o); }"
 
 ///|
 fn backend_features() -> Array[Feature] {
@@ -329,7 +331,8 @@ fn backend_take_refused_grow(handle : InstanceHandle) -> Bool {
 
 ///|
 fn backend_memory_size(handle : InstanceHandle) -> Int64 {
-  js_memory_size(handle.instance).to_int64()
+  // The prepared module exports memory 0 under a reserved name, whether or not the module exports it.
+  js_memory_size(handle.instance, @binary.memory_export).to_int64()
 }
 
 ///|
@@ -341,7 +344,12 @@ fn backend_memory_read(
   guard offset + length.to_int64() <= backend_memory_size(handle) else {
     raise OutOfBounds(offset, length)
   }
-  js_memory_read(handle.instance, offset.to_double(), length)
+  js_memory_read(
+    handle.instance,
+    @binary.memory_export,
+    offset.to_double(),
+    length,
+  )
 }
 
 ///|
@@ -353,5 +361,10 @@ fn backend_memory_write(
   guard offset + bytes.length().to_int64() <= backend_memory_size(handle) else {
     raise OutOfBounds(offset, bytes.length())
   }
-  js_memory_write(handle.instance, offset.to_double(), bytes.to_owned())
+  js_memory_write(
+    handle.instance,
+    @binary.memory_export,
+    offset.to_double(),
+    bytes.to_owned(),
+  )
 }

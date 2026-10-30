@@ -386,3 +386,50 @@ test "Multiple memories: both engines refuse the module with the feature multi-m
   }
   assert_true(error is FeatureUnsupported(MultiMemory))
 }
+
+///|
+test "Start function: it runs once after the instance exists, and its host call sees the memory" {
+  let seen = Ref(0)
+  let had_memory = Ref(false)
+  let imports = @engine.Imports::new().host(
+    "env",
+    "seen",
+    @engine.Signature::new([], []),
+    (caller, _) => {
+      seen.val += 1
+      had_memory.val = caller.memory() is Some(_)
+      []
+    },
+  )
+  let module_ = compile(@fixtures.start_host())
+  let instance = module_.instantiate(imports)
+  assert_eq(seen.val, 1)
+  assert_true(had_memory.val)
+  assert_eq(instance.call("count", []), [I32(1)])
+  // The exports that the engine adds are not the module's.
+  assert_false(instance.has_function("__moonrockz_extism_start"))
+  assert_eq(module_.exports().map(e => e.name), ["count"])
+}
+
+///|
+test "Start function trap: the instantiation fails with a start error on both engines" {
+  let module_ = compile(@fixtures.start_trap())
+  let error = try module_.instantiate(@engine.Imports::new()) catch {
+    error => error
+  } noraise {
+    _ => fail("the instantiation must fail")
+  }
+  assert_true(error is Start(Trap(Unreachable)))
+}
+
+///|
+test "a module that exports a reserved name is refused" {
+  // (module (func (export "__moonrockz_extism_start")))
+  let bytes = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x07\x1c\x01\x18\x5f\x5f\x6d\x6f\x6f\x6e\x72\x6f\x63\x6b\x7a\x5f\x65\x78\x74\x69\x73\x6d\x5f\x73\x74\x61\x72\x74\x00\x00\x0a\x04\x01\x02\x00\x0b"
+  let error = try @engine.Engine::default().compile(bytes) catch {
+    error => error
+  } noraise {
+    _ => fail("the load must fail")
+  }
+  assert_true(error is Invalid(_))
+}

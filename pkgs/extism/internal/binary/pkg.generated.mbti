@@ -8,6 +8,12 @@ import {
 // Values
 pub let grow_flag_export : String
 
+pub let memory_export : String
+
+pub let reserved_prefix : String
+
+pub let start_export : String
+
 // Errors
 pub suberror DecodeError {
   DecodeError(Int32, String)
@@ -95,6 +101,7 @@ pub struct Module {
   memories : Array[Limits]
   global_count : Int32
   exports : Array[Export]
+  start : Int32?
   data_segment_count : Int32
   // private fields
 }
@@ -107,6 +114,7 @@ pub fn Module::imported_global_count(Self) -> Int32
 pub fn Module::imports_memory(Self) -> Bool
 pub fn Module::memory(Self) -> Limits?
 pub fn Module::parse(Bytes) -> Self raise DecodeError
+pub fn Module::prepare(Self) -> Bytes raise DecodeError
 pub fn Module::uses_globals(Self) -> Bool raise DecodeError
 
 pub(all) struct Section {

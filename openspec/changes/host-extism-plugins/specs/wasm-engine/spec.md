@@ -51,13 +51,35 @@ instances come from one compiled module.
   different instances A1 and A2
 - **THEN** a call of `alloc` in the first B instance changes only A1's memory, and in the second only A2's memory
 
+### Requirement: Start function as a bounded call
+Both engines SHALL run the start function of a module after the instance exists, as a call with the budget and
+the deadline that the instantiation gets, and SHALL make the instantiation fail with a start error that holds the
+call error when it fails. A host function that the start function calls SHALL see the memory of the instance.
+
+#### Scenario: Start function sees the memory
+- **WHEN** a module's start function calls a host function that reads the caller's memory, on either engine
+- **THEN** the host function gets the memory, the start function runs one time, and the instance is usable
+
+#### Scenario: Start function trap
+- **WHEN** a module's start function traps, on either engine
+- **THEN** the instantiation fails with a start error that holds the trap kind
+
+#### Scenario: Start function under the deadline
+- **WHEN** a module's start function loops forever, on native with a deadline or a budget
+- **THEN** the instantiation fails with a start error that holds `Interrupted` or `BudgetExhausted`
+
 ### Requirement: Guest memory access
-The engine SHALL let a host function and the caller read and write the exported memory of an instance by offset
-and length. An access outside the current memory size SHALL raise an error and SHALL NOT read or write any byte.
+The engine SHALL let a host function and the caller read and write the memory of an instance by offset and
+length, on both engines, whether or not the module exports its memory. An access outside the current memory size
+SHALL raise an error and SHALL NOT read or write any byte.
 
 #### Scenario: Read past the end
 - **WHEN** a host function reads 8 bytes at 4 bytes before the end of guest memory
 - **THEN** the read raises an out-of-bounds error and no bytes are returned
+
+#### Scenario: Memory that the module does not export
+- **WHEN** a WASI plugin whose module does not export its memory writes to stdout, on native and on js
+- **THEN** the stdout sink gets the bytes on both engines
 
 ### Requirement: Memory ceiling
 Each instance SHALL have a memory ceiling in 64 KiB pages, also when the module declares no maximum or a larger
