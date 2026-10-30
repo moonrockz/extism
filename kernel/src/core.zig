@@ -27,6 +27,9 @@ pub const blocks_offset: u64 = root_offset + root_size;
 /// A block header: status (u8), padding, size (u32) and used length (u32).
 pub const block_header_size: u64 = 12;
 
+/// The bytes after the root record that the first initialization clears, as upstream: 12 headers.
+pub const root_clear_size: u64 = block_header_size * block_header_size;
+
 /// Free blocks with at least this many bytes more than an allocation are split.
 const split_threshold: u32 = 128;
 
@@ -35,6 +38,9 @@ const Status = enum(u8) { unused = 0, active = 1, free = 2 };
 /// No block. A block header is never at offset 0, which is outside the blocks. The block functions return
 /// it in place of an optional, so that no result goes through a stack in linear memory.
 const none: u64 = 0;
+
+/// A block walk that reaches a header outside the memory, where upstream traps.
+const walk_failed: u64 = std.math.maxInt(u64);
 
 // Offsets of the root record fields (repr(C) of the upstream `MemoryRoot`, placed at offset 1).
 const initialized_at = root_offset + 0;
@@ -111,7 +117,9 @@ pub fn Kernel(comptime Memory: type) type {
             writeU64(error_at, 0);
             writeU64(length_at, page_size - root_size);
             writeU64(position_at, 0);
-            @memset(Memory.bytes()[@intCast(blocks_offset)..][0..@intCast(block_header_size)], 0);
+            // Upstream calls `write_bytes` on a `MemoryBlock` pointer with the count
+            // `size_of::<MemoryBlock>()`, so it clears that many block headers, not one.
+            @memset(Memory.bytes()[@intCast(blocks_offset)..][0..@intCast(root_clear_size)], 0);
         }
 
         /// Upstream `pointer_in_bounds`: inside the blocks that the allocator tracks.
@@ -135,25 +143,40 @@ pub fn Kernel(comptime Memory: type) type {
             return count / page_size + @intFromBool(count % page_size != 0);
         }
 
-        fn nextBlock(block: u64) u64 {
-            return block +% block_header_size +% readU32(block + size_in_block);
+        /// An address as upstream computes it: a wasm32 pointer, so the sum wraps at 2^32.
+        fn address(value: u64) u64 {
+            return @as(u32, @truncate(value));
         }
 
+        fn nextBlock(block: u64) u64 {
+            return address(block +% block_header_size +% readU32(block + size_in_block));
+        }
+
+        /// A free or unused block for `count` bytes, `none`, or `walk_failed` where upstream traps: the walk
+        /// reads a status or a size outside the memory, or the block that it gives has a header that ends
+        /// outside the memory. Upstream reads the status, then the size, of each block, and nothing more.
         fn findFreeBlock(count: u64, position: u64) u64 {
             const wanted: u32 = @truncate(count);
             var block = blocks_offset;
             while (block < blocks_offset +% position) : (block = nextBlock(block)) {
-                if (!inMemory(block, block_header_size)) return none;
+                if (!inMemory(block + status_in_block, 1)) return walk_failed;
                 const status = readU8(block + status_in_block);
-                if (status == @intFromEnum(Status.unused)) return block;
+                if (status == @intFromEnum(Status.unused)) {
+                    // The caller writes the used length and the status of the block.
+                    if (!inMemory(block, block_header_size)) return walk_failed;
+                    return block;
+                }
+                if (!inMemory(block + size_in_block, 4)) return walk_failed;
                 const size = readU32(block + size_in_block);
                 if (status == @intFromEnum(Status.free) and size >= wanted) {
+                    if (!inMemory(block, block_header_size)) return walk_failed;
                     if (size - wanted >= split_threshold) {
                         const kept = size -% (wanted +% @as(u32, block_header_size));
+                        const split = address(block +% block_header_size +% kept);
+                        // Upstream traps at the write of the split header; nothing changes here.
+                        if (!inMemory(split, block_header_size)) return walk_failed;
                         writeU32(block + size_in_block, kept);
                         writeU32(block + used_in_block, 0);
-                        const split = block + block_header_size + kept;
-                        if (!inMemory(split, block_header_size)) return none;
                         writeU32(split + size_in_block, wanted);
                         writeU32(split + used_in_block, 0);
                         writeU8(split + status_in_block, @intFromEnum(Status.free));
@@ -168,12 +191,15 @@ pub fn Kernel(comptime Memory: type) type {
         fn allocBlock(count: u64) u64 {
             const position = readU64(position_at);
             const tracked = readU64(length_at);
-            const current = blocks_offset +% position;
+            // Upstream casts the position to a wasm32 pointer.
+            const current = address(blocks_offset +% position);
             const left = tracked -% position -% root_size;
             const with_header = count +% block_header_size;
             if (with_header >= left) {
                 if (with_header <= position) {
                     const block = findFreeBlock(count, position);
+                    // Where upstream traps, the allocation fails and nothing changes.
+                    if (block == walk_failed) return none;
                     if (block != none) {
                         writeU32(block + used_in_block, @truncate(count));
                         writeU8(block + status_in_block, @intFromEnum(Status.active));
@@ -196,9 +222,11 @@ pub fn Kernel(comptime Memory: type) type {
             if (!inBoundsFast(offset)) return none;
             var block = blocks_offset;
             while (block < blocks_offset +% offset) : (block = nextBlock(block)) {
-                if (!inMemory(block, block_header_size)) return none;
+                // Where upstream reads a status or a size outside the memory, it traps; here no block is found.
+                if (!inMemory(block + status_in_block, 1)) return none;
                 if (readU8(block + status_in_block) == @intFromEnum(Status.active) and
-                    block + block_header_size == offset) return block;
+                    address(block + block_header_size) == offset) return block;
+                if (!inMemory(block + size_in_block, 4)) return none;
             }
             return none;
         }
@@ -208,7 +236,7 @@ pub fn Kernel(comptime Memory: type) type {
             root();
             const block = allocBlock(count);
             if (block == none) return 0;
-            return block + block_header_size;
+            return address(block + block_header_size);
         }
 
         pub fn free(handle: u64) void {

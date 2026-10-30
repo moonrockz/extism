@@ -58,60 +58,184 @@ fn Kernel::run(self : Kernel, name : String, args : Array[Int64]) -> Int64? {
 }
 
 ///|
-/// A deterministic sequence of kernel calls: allocate, store, load, free, reuse, input, output,
-/// error, reset and out of memory.
-fn sequence(seed : Int32, steps : Int32) -> Array[(String, Array[Int64])] {
-  let mut state = seed
-  let next = (n : Int32) => {
-    state = (state * 1103515245 + 12345) & 0x7fffffff
-    state % n
+/// A deterministic random number source for the call sequences.
+struct Rng {
+  mut state : Int
+}
+
+///|
+fn Rng::next(self : Rng, n : Int) -> Int {
+  self.state = (self.state * 1103515245 + 12345) & 0x7fffffff
+  self.state % n
+}
+
+///|
+/// The initial size of kernel memory: 16 pages.
+let kernel_end : Int64 = 16L * 65536L
+
+///|
+/// A 64-bit value to store: small numbers, and values near 2^63 and 2^64.
+fn Rng::value(self : Rng) -> Int64 {
+  match self.next(8) {
+    0 => -1L
+    1 => -2L
+    2 => 0x7fffffffffffffffL
+    3 => 0x7fffffffffffffffL + 1L
+    4 => (self.next(0x7fffffff).to_int64() << 33) | self.next(0x7fffffff).to_int64()
+    _ => self.next(256).to_int64()
   }
-  let handles : Array[Int64] = []
+}
+
+///|
+/// An offset in a block, with the edges of a 64-byte block and of the 64-bit loads and stores.
+fn Rng::offset(self : Rng) -> Int64 {
+  match self.next(10) {
+    0 => 56L
+    1 => 57L
+    2 => 63L
+    3 => 64L
+    _ => self.next(20).to_int64()
+  }
+}
+
+///|
+/// The next call of a sequence: allocate, store, load, free, reuse, input, output, error, reset and out of
+/// memory. The calls refer to the handles that upstream's `alloc` gave, to plausible guesses, to the
+/// edge of the root record at offset 64, and to the end of kernel memory.
+fn Rng::call(self : Rng, handles : Array[Int64]) -> (String, Array[Int64]) {
   let pick = () => {
-    if handles.length() > 0 && next(4) != 0 {
-      handles[next(handles.length())]
-    } else {
-      next(200000).to_int64()
-    }
-  }
-  let calls = []
-  for _ in 0..<steps {
-    let call = match next(12) {
-      0 | 1 => {
-        let size = if next(5) != 0 { next(300) } else { next(200000) }
-        // The handle of a fresh allocation is the bump position; record a guess for later calls.
-        ("alloc", [size.to_int64()])
-      }
-      2 => ("free", [pick()])
-      3 => ("length", [pick()])
-      4 => ("length_unsafe", [pick()])
-      5 => ("store_u8", [pick() + next(20).to_int64(), next(256).to_int64()])
-      6 => ("load_u64", [pick() + next(20).to_int64()])
-      7 => ("input_set", [pick(), next(30).to_int64()])
-      8 => ("input_load_u8", [next(40).to_int64()])
-      9 => ("error_set", [if next(3) != 0 { pick() } else { 0L }])
-      10 =>
-        if next(10) == 0 {
-          ("reset", [])
-        } else {
-          ("output_set", [pick(), next(30).to_int64()])
-        }
+    match self.next(10) {
+      0 => self.next(200000).to_int64()
+      1 => [56L, 57L, 63L, 64L, 65L][self.next(5)]
+      2 => kernel_end - 8L + self.next(16).to_int64()
       _ =>
-        (
-          [
-            "input_length", "input_offset", "output_length", "output_offset", "error_get",
-            "memory_bytes",
-          ][next(6)],
-          [],
-        )
-    }
-    calls.push(call)
-    if call.0 == "alloc" {
-      // Later calls refer to a plausible handle: 77 is the first handle of a fresh kernel.
-      handles.push(77L + next(1000).to_int64())
+        if handles.length() > 0 {
+          handles[self.next(handles.length())]
+        } else {
+          77L
+        }
     }
   }
-  calls
+  match self.next(14) {
+    0 | 1 => {
+      let size = if self.next(5) != 0 {
+        self.next(300)
+      } else {
+        self.next(200000)
+      }
+      ("alloc", [size.to_int64()])
+    }
+    2 => ("free", [pick()])
+    3 => ("length", [pick()])
+    4 => ("length_unsafe", [pick()])
+    5 => ("store_u8", [pick() + self.offset(), self.next(256).to_int64()])
+    6 => ("store_u64", [pick() + self.offset(), self.value()])
+    7 => ("load_u64", [pick() + self.offset()])
+    8 => ("load_u8", [pick() + self.offset()])
+    9 => ("input_set", [pick(), self.next(80).to_int64()])
+    10 =>
+      if self.next(2) == 0 {
+        ("input_load_u8", [self.next(90).to_int64()])
+      } else {
+        ("input_load_u64", [self.next(90).to_int64()])
+      }
+    11 => ("error_set", [if self.next(3) != 0 { pick() } else { 0L }])
+    12 =>
+      if self.next(10) == 0 {
+        ("reset", [])
+      } else {
+        ("output_set", [pick(), self.next(30).to_int64()])
+      }
+    _ =>
+      (
+        [
+          "input_length", "input_offset", "output_length", "output_offset", "error_get",
+          "memory_bytes",
+        ][self.next(6)],
+        [],
+      )
+  }
+}
+
+///|
+/// A kernel result for a test message.
+fn shown(result : Int64?) -> String {
+  match result {
+    Some(value) => value.to_string()
+    None => "a trap"
+  }
+}
+
+///|
+/// A kernel with the calls `calls` run on it.
+fn Kernel::replay(
+  bytes : Bytes,
+  ceiling : Int32,
+  calls : Array[(String, Array[Int64])],
+) -> Kernel raise {
+  let kernel = Kernel::start(bytes, ceiling)
+  for call in calls {
+    kernel.run(call.0, call.1) |> ignore
+  }
+  kernel
+}
+
+///|
+/// Runs a generated sequence of `steps` calls on both kernels. Every result must be the same. Where
+/// upstream traps, the Zig kernel traps too or gives 0, as the out-of-bounds requirement says; then both
+/// kernels start again with the calls before the trap, and the sequence goes on. Gives the number of
+/// calls and the number of upstream traps.
+fn differential_sequence(
+  seed : Int,
+  steps : Int,
+  ceiling~ : Int32 = 64,
+) -> (Int, Int) raise {
+  let rng = { state: seed }
+  let mut ours = Kernel::start(@kernel.bytes(), ceiling)
+  let mut theirs = Kernel::start(@upstream.upstream_kernel(), ceiling)
+  let handles : Array[Int64] = []
+  let done : Array[(String, Array[Int64])] = []
+  let mut traps = 0
+  for step in 0..<steps {
+    let (name, args) = rng.call(handles)
+    let expected = theirs.run(name, args)
+    let actual = ours.run(name, args)
+    match expected {
+      Some(value) => {
+        assert_eq(
+          actual,
+          expected,
+          msg="seed \{seed}: \{name} \{args.map(a => a.to_string()).join(", ")} at step \{step}: ours \{shown(actual)}, upstream \{shown(expected)}",
+        )
+        done.push((name, args))
+        if name == "alloc" && value != 0L {
+          handles.push(value)
+        }
+      }
+      None => {
+        traps += 1
+        assert_true(
+          actual is None || actual is Some(0L),
+          msg="seed \{seed}: \{name} \{args.map(a => a.to_string()).join(", ")} at step \{step}: upstream traps, ours gives \{shown(actual)}",
+        )
+        ours = Kernel::replay(@kernel.bytes(), ceiling, done)
+        theirs = Kernel::replay(@upstream.upstream_kernel(), ceiling, done)
+      }
+    }
+  }
+  // The bytes at each live handle are the same.
+  for handle in handles {
+    let length = theirs.run("length", [handle]).unwrap_or(0L)
+    assert_eq(ours.run("length", [handle]), Some(length))
+    for i = 0L; i < length && i < 72L; i = i + 1L {
+      assert_eq(
+        ours.run("load_u8", [handle + i]),
+        theirs.run("load_u8", [handle + i]),
+        msg="seed \{seed}: byte \{i} of handle \{handle}, length \{length}",
+      )
+    }
+  }
+  (steps, traps)
 }
 
 ///|
@@ -122,7 +246,6 @@ fn differential(
 ) -> Int32 raise {
   let ours = Kernel::start(@kernel.bytes(), ceiling)
   let theirs = Kernel::start(@upstream.upstream_kernel(), ceiling)
-  let live : Array[Int64] = []
   let mut compared = 0
   for call in calls {
     let (name, args) = call
@@ -130,20 +253,6 @@ fn differential(
     let actual = ours.run(name, args)
     assert_eq(actual, Some(expected), msg="\{name} after \{compared} calls")
     compared += 1
-    if name == "alloc" && expected != 0L {
-      live.push(expected)
-    }
-  }
-  // The bytes at each live handle are the same.
-  for handle in live {
-    let length = theirs.run("length", [handle]).unwrap_or(0L)
-    assert_eq(ours.run("length", [handle]), Some(length))
-    for i = 0L; i < length && i < 64L; i = i + 1L {
-      assert_eq(
-        ours.run("load_u8", [handle + i]),
-        theirs.run("load_u8", [handle + i]),
-      )
-    }
   }
   compared
 }
@@ -151,10 +260,15 @@ fn differential(
 ///|
 test "Differential call sequence: the Zig kernel gives the upstream results" {
   let mut total = 0
-  for seed in 1..<=40 {
-    total += differential(sequence(seed, 150))
+  let mut traps = 0
+  for seed in 1..<=60 {
+    let (calls, trapped) = differential_sequence(seed, 200)
+    total += calls
+    traps += trapped
   }
-  assert_true(total > 3000)
+  assert_eq(total, 12000)
+  // The sequences reach the end of kernel memory, where upstream traps.
+  assert_true(traps > 0)
 }
 
 ///|
@@ -234,6 +348,29 @@ test "Store into the root record: the next alloc gives the upstream handle" {
     ]),
     4,
   )
+}
+
+///|
+test "Store at the edge of the root record: stores that end at 63 change nothing, at 64 they run, as upstream" {
+  let calls = [
+    ("alloc", [100L]),
+    ("output_set", [77L, 5L]),
+    // p + n - 1 is 63: refused.
+    ("store_u8", [63L, 0xffL]),
+    ("store_u64", [56L, -1L]),
+    ("output_length", []),
+    ("load_u64", [56L]),
+    // p + n - 1 is 64: the store runs, into the last byte of the root record.
+    ("store_u8", [64L, 0x01L]),
+    ("store_u64", [57L, 0x0102030405060708L]),
+    ("load_u64", [57L]),
+    ("load_u8", [64L]),
+    ("output_offset", []),
+    ("output_length", []),
+    ("alloc", [8L]),
+    ("length", [77L]),
+  ]
+  assert_eq(differential(calls), calls.length())
 }
 
 ///|

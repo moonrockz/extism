@@ -262,3 +262,36 @@ test "an access that ends past the memory is refused where upstream traps" {
     K.storeU8(end - 1, 9);
     try testing.expectEqual(@as(u8, 9), K.loadU8(end - 1));
 }
+
+test "the first call that reads the root clears 144 bytes after it, as upstream" {
+    // Upstream `MemoryRoot::new` calls `write_bytes` on a `MemoryBlock` pointer with the count
+    // `size_of::<MemoryBlock>()`, so it clears 12 blocks of 12 bytes, not one.
+    fresh();
+    var at: u64 = core.blocks_offset;
+    while (at < core.blocks_offset + 160) : (at += 1) K.storeU8(at, 0xaa);
+    _ = K.inputLoadU64(0);
+    try testing.expectEqual(@as(u8, 0), K.loadU8(core.blocks_offset));
+    try testing.expectEqual(@as(u8, 0), K.loadU8(77));
+    try testing.expectEqual(@as(u8, 0), K.loadU8(core.blocks_offset + 143));
+    try testing.expectEqual(@as(u8, 0xaa), K.loadU8(core.blocks_offset + 144));
+}
+
+test "the block walk adds in 32 bits, as upstream's wasm32 pointers do" {
+    // A store that sets the size of the first block to 2^32 - 1 makes upstream's next block pointer
+    // wrap around to 76, where the walk finds an unused block and gives the handle 88.
+    fresh();
+    try testing.expectEqual(@as(u64, 77), K.alloc(1000));
+    _ = K.alloc(200000);
+    K.storeU64(68, 0xfffffffffffffffe);
+    try testing.expectEqual(@as(u64, 88), K.alloc(100000));
+}
+
+test "a new block's address is a 32-bit pointer, as upstream's" {
+    // A position past 2^32, which a block header written over the root record can make, places the new
+    // block at the position modulo 2^32, as upstream's pointer cast does.
+    fresh();
+    _ = K.alloc(1);
+    const position: u64 = (1 << 32) + 100;
+    for (0..8) |i| TestMemory.buffer[core.root_offset + 8 + i] = @truncate(position >> @intCast(8 * i));
+    try testing.expectEqual(@as(u64, core.blocks_offset + 100 + core.block_header_size), K.alloc(5));
+}

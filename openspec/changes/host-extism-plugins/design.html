@@ -204,6 +204,15 @@ call sequences (allocate, store, load, free, reuse, input, output, error, reset,
 and on upstream <code>extism-runtime.wasm</code>, both on the js engine, and compares every result and every live
 block. The upstream file is a test fixture with its BSD-3-Clause license and SHA-256; it is not in the published
 package. The js engine accepts its externref global, so the fixture runs unchanged.</p>
+<p>The sequences are generated with the handles that upstream's <code>alloc</code> gives, so later calls reach
+live and freed blocks. They include <code>store_u64</code> and <code>input_load_u64</code>, the offsets at the
+edge of the root record and of 64-bit accesses (56, 57, 63, 64), values near 2^64, and addresses at the end of
+memory. Where upstream traps, the test checks that the Zig kernel traps or gives 0, starts both kernels again
+with the calls before the trap, and goes on. These sequences found three upstream details that the Zig kernel
+now follows: the first initialization clears 144 bytes after the root record (upstream's
+<code>write_bytes</code> counts <code>MemoryBlock</code> values, not bytes); the block walk adds in 32 bits, as
+wasm32 pointers do, so a size that a plugin forges wraps around; and a new block is placed at the position
+modulo 2^32.</p>
 
 <h3 id="eng-1">ENG-1. The engine API (Call)</h3>
 <p>The engine package gives one API with two backends. Names are subject-first and values are typed:</p>

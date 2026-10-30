@@ -37,8 +37,16 @@ the handle that `alloc` returns, `length` of live, freed and unknown handles, re
 input and output offsets and lengths, and `error_set` and `error_get`.
 
 #### Scenario: Differential call sequence
-- **WHEN** the same recorded sequence of kernel calls runs on the Zig kernel and on upstream `extism-runtime.wasm`
-- **THEN** every call gives the same result and the bytes at each live handle are the same
+- **WHEN** generated sequences of kernel calls run on the Zig kernel and on upstream `extism-runtime.wasm`: with
+  the handles that upstream's `alloc` gives, `store_u64` and `input_load_u64`, offsets 56, 57, 63 and 64, values
+  near 2^64, and calls past the end of memory, where both kernels start again after an upstream trap
+- **THEN** every call gives the same result, the Zig kernel traps or gives 0 where upstream traps, and the bytes at
+  each live handle are the same
+
+#### Scenario: Store at the edge of the root record
+- **WHEN** a plugin stores at offsets whose last byte is 63, and at offsets whose last byte is 64
+- **THEN** the first stores change nothing and the second ones run, as upstream, and later calls give the upstream
+  results
 
 #### Scenario: Freed handle
 - **WHEN** a block is freed and `length` is called with its handle
