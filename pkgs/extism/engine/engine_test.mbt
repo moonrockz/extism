@@ -472,3 +472,23 @@ test "A host function that ends the call with exit code 0 leaves the instance us
   assert_true(error is Host(Exit(3)))
   assert_false(instance.is_usable())
 }
+
+///|
+test "an index or count of 0xffffffff is invalid, not a panic" {
+  for
+    bytes in [
+      // (type (func)) (import "a" "b" (func (type 0xffffffff)))
+      b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x02\x0b\x01\x01a\x01b\x00\xff\xff\xff\xff\x0f",
+      // (type (func)) (func (type 0)) (export "f" (func 0xffffffff)) (code (func))
+       b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x07\x09\x01\x01f\x00\xff\xff\xff\xff\x0f\x0a\x04\x01\x02\x00\x0b",
+      // An import section with a count of 0xffffffff.
+       b"\x00\x61\x73\x6d\x01\x00\x00\x00\x02\x05\xff\xff\xff\xff\x0f",
+    ] {
+    let error = try compile(bytes) catch {
+      error => error
+    } noraise {
+      _ => fail("the load must fail")
+    }
+    assert_true(error is Invalid(_))
+  }
+}

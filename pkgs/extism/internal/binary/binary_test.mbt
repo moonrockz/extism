@@ -117,7 +117,9 @@ fn refused(read : () -> @binary.Module raise @binary.DecodeError) -> Bool {
 /// Reads `bytes` as the engines do: the parse, the global scan and both rewrites. A refusal is a
 /// `DecodeError`; any other end of the test (a panic) fails it.
 fn read_all(bytes : Bytes) -> Unit {
-  let module_ = @binary.Module::parse(bytes) catch { DecodeError(_, _) => return }
+  let module_ = @binary.Module::parse(bytes) catch {
+    DecodeError(_, _) => return
+  }
   (module_.uses_globals() |> ignore) catch {
     DecodeError(_, _) => ()
   }
@@ -147,7 +149,7 @@ let fuzz_fixtures : Array[Bytes] = [
 ///|
 test "Parser fuzz: every truncation of every fixture is refused or read, never a panic" {
   for bytes in fuzz_fixtures {
-    for length in 0..=bytes.length() {
+    for length in 0..<=bytes.length() {
       read_all(bytes[0:length].to_owned())
     }
   }
@@ -157,7 +159,7 @@ test "Parser fuzz: every truncation of every fixture is refused or read, never a
 test "Parser fuzz: changed bytes are refused or read, never a panic" {
   // A fixed linear congruential generator, so that each run reads the same inputs.
   let mut state = 0x2545f491UL
-  let next = (bound : Int) => {
+  let next = (bound : Int32) => {
     state = state * 6364136223846793005UL + 1442695040888963407UL
     ((state >> 33).to_int() & 0x7fffffff) % bound
   }
@@ -214,7 +216,11 @@ test "prepare: the start function becomes an export, memory 0 is exported and th
   assert_eq(prepared.start, None)
   assert_false(prepared.sections.iter().any(s => s.id == 8))
   assert_true(
-    prepared.exports.contains({ name: @binary.start_export, kind: Func, index: 1 }),
+    prepared.exports.contains({
+      name: @binary.start_export,
+      kind: Func,
+      index: 1,
+    }),
   )
   assert_true(
     prepared.exports.contains({
@@ -243,4 +249,56 @@ test "prepare refuses a module that exports a reserved name" {
     _ => false
   }
   assert_true(refused)
+}
+
+///|
+/// Modules whose indices, counts or sizes are the u32 value 0xffffffff, a number that does not fit
+/// in an `Int32`. The parser runs before the engines validate the module, so each one must be a
+/// decode error and not a negative index.
+let large_u32_modules : Array[Bytes] = [
+  // (type (func)) (import "a" "b" (func (type 0xffffffff)))
+  b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x02\x0b\x01\x01a\x01b\x00\xff\xff\xff\xff\x0f",
+  // (type (func)) (func (type 0)) (export "f" (func 0xffffffff)) (code (func))
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x07\x09\x01\x01f\x00\xff\xff\xff\xff\x0f\x0a\x04\x01\x02\x00\x0b",
+  // An import section with a count of 0xffffffff.
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x02\x05\xff\xff\xff\xff\x0f",
+  // A function section whose type index is 0xffffffff.
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x03\x06\x01\xff\xff\xff\xff\x0f",
+  // A start section with the function 0xffffffff.
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x08\x05\xff\xff\xff\xff\x0f",
+  // A data section with a count of 0xffffffff.
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x0b\x05\xff\xff\xff\xff\x0f",
+  // A section size of 0x7fffffff, which overflows the end offset.
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x00\xff\xff\xff\xff\x07",
+  // An import whose module name length is 0x7fffffff, which overflows the end offset.
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x02\x06\x01\xff\xff\xff\xff\x07",
+  // A code section whose body size is 0x7fffffff.
+   b"\x00\x61\x73\x6d\x01\x00\x00\x00\x0a\x06\x01\xff\xff\xff\xff\x07",
+]
+
+///|
+test "an index, count or size of 0xffffffff is a decode error, not a panic" {
+  for bytes in large_u32_modules {
+    assert_true(refused(() => @binary.Module::parse(bytes)))
+  }
+}
+
+///|
+test "an index equal to its bound is a decode error, one below it is read" {
+  // (type (func)) (import "a" "b" (func (type 1))): one type, so index 1 is out of bounds.
+  let unknown = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x02\x07\x01\x01a\x01b\x00\x01"
+  assert_true(refused(() => @binary.Module::parse(unknown)))
+  // (type (func)) (import "a" "b" (func (type 0)))
+  let known = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x04\x01\x60\x00\x00\x02\x07\x01\x01a\x01b\x00\x00"
+  assert_eq(@binary.Module::parse(known).imported_function_count(), 1)
+}
+
+///|
+test "Parser fuzz: indices, counts and sizes of 0xffffffff are refused, never a panic" {
+  for bytes in large_u32_modules {
+    read_all(bytes)
+    for length in 0..<=bytes.length() {
+      read_all(bytes[0:length].to_owned())
+    }
+  }
 }

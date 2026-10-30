@@ -264,7 +264,7 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
   let mut start_function = None
   while !reader.done() {
     let id = reader.byte()
-    let size = reader.u32()
+    let size = reader.length()
     let start = reader.at
     reader.skip(size)
     sections.push({ id, start, end: start + size, })
@@ -286,12 +286,10 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
           let name = section.name()
           let type_ = match section.byte() {
             0x00 => {
-              let index = section.u32()
-              guard index < types.length() else {
-                raise section.fail(
-                  "import \{module_}.\{name} has an unknown type",
-                )
-              }
+              let index = section.index(
+                types.length(),
+                "the type of import \{module_}.\{name}",
+              )
               ImportType::Func(types[index])
             }
             0x01 => {
@@ -352,19 +350,22 @@ pub fn Module::parse(bytes : Bytes) -> Module raise DecodeError {
         }
       10 =>
         for _ in 0..<section.count() {
-          let body_size = section.u32()
+          let body_size = section.length()
           let body_start = section.at
           section.skip(body_size)
           bodies.push({ start: body_start, end: body_start + body_size, })
         }
       8 => start_function = Some(section.u32())
-      11 => data_segment_count = section.u32()
+      11 => data_segment_count = section.count()
       13 => add_feature(features, ExceptionHandling)
       _ => ()
     }
   }
   // Both engines take one memory; a second one, defined or imported, is the multi-memory proposal.
-  let imported_memories = imports.iter().filter(i => i.type_ is Memory(_)).count()
+  let imported_memories = imports
+    .iter()
+    .filter(i => i.type_ is Memory(_))
+    .count()
   if imported_memories + memories.length() > 1 {
     add_feature(features, MultiMemory)
   }
