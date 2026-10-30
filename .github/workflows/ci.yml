@@ -99,13 +99,31 @@ jobs:
       - name: Check the site
         run: mise run check:site -- --json
 
+  # The Zig kernel: its tests, and a check that the embedded bytes match a fresh build.
+  kernel:
+    name: Kernel
+    runs-on: ubuntu-latest
+    needs: [lint]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install pinned tools
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test the kernel
+        run: mise run test:kernel
+      - name: Check the embedded kernel bytes
+        run: mise run check:kernel
+
   # A single required check for branch protection.
   ci-ok:
     name: ci-ok
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [lint, test, test-scripts, site]
+    needs: [lint, test, test-scripts, site, kernel]
     steps:
       - name: Require every job to succeed
         env:

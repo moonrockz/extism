@@ -1,0 +1,27 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonrockz/extism/internal/fixtures"
+
+// Values
+pub fn add() -> Bytes
+
+pub fn big() -> Bytes
+
+pub fn features() -> Bytes
+
+pub fn grow() -> Bytes
+
+pub fn host() -> Bytes
+
+pub fn link() -> Bytes
+
+pub fn simd() -> Bytes
+
+pub fn traps() -> Bytes
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits

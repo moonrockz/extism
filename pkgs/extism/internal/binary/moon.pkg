@@ -1,0 +1,11 @@
+// A reader of WASM module bytes for the engines and the plugin API: sections, imports, exports,
+// memory limits, the feature scan and the js rewrite. It is pure, so it supports all four targets.
+import {
+  "moonbitlang/core/buffer",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/encoding/utf8",
+}
+
+import {
+  "moonrockz/extism/internal/fixtures",
+} for "test"

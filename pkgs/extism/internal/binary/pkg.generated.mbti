@@ -1,0 +1,136 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonrockz/extism/internal/binary"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub let grow_flag_export : String
+
+// Errors
+pub suberror DecodeError {
+  DecodeError(Int32, String)
+}
+
+// Types and methods
+pub(all) struct Export {
+  name : String
+  kind : ExportKind
+  index : Int32
+} derive(Eq, @debug.Debug)
+pub fn Export::equal(Self, Self) -> Bool
+pub fn Export::not_equal(Self, Self) -> Bool
+pub fn Export::to_repr(Self) -> @debug.Repr
+
+pub(all) enum ExportKind {
+  Func
+  Table
+  Memory
+  Global
+  Tag
+} derive(Eq, @debug.Debug)
+pub fn ExportKind::equal(Self, Self) -> Bool
+pub fn ExportKind::not_equal(Self, Self) -> Bool
+pub fn ExportKind::to_repr(Self) -> @debug.Repr
+
+pub(all) enum Feature {
+  Simd
+  Threads
+  Memory64
+  ExceptionHandling
+  Gc
+  TailCall
+  Unknown(String)
+} derive(Eq, @debug.Debug)
+pub fn Feature::equal(Self, Self) -> Bool
+pub fn Feature::not_equal(Self, Self) -> Bool
+pub fn Feature::to_repr(Self) -> @debug.Repr
+
+pub(all) struct FuncType {
+  params : Array[ValType]
+  results : Array[ValType]
+} derive(Eq, @debug.Debug)
+pub fn FuncType::equal(Self, Self) -> Bool
+pub fn FuncType::not_equal(Self, Self) -> Bool
+pub fn FuncType::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Import {
+  module_ : String
+  name : String
+  type_ : ImportType
+} derive(Eq, @debug.Debug)
+pub fn Import::equal(Self, Self) -> Bool
+pub fn Import::not_equal(Self, Self) -> Bool
+pub fn Import::to_repr(Self) -> @debug.Repr
+
+pub(all) enum ImportType {
+  Func(FuncType)
+  Table
+  Memory(Limits)
+  Global
+  Tag
+} derive(Eq, @debug.Debug)
+pub fn ImportType::equal(Self, Self) -> Bool
+pub fn ImportType::not_equal(Self, Self) -> Bool
+pub fn ImportType::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Limits {
+  min : Int64
+  max : Int64?
+  shared : Bool
+  is64 : Bool
+} derive(Eq, @debug.Debug)
+pub fn Limits::equal(Self, Self) -> Bool
+pub fn Limits::not_equal(Self, Self) -> Bool
+pub fn Limits::to_repr(Self) -> @debug.Repr
+
+pub struct Module {
+  bytes : Bytes
+  sections : Array[Section]
+  types : Array[FuncType]
+  imports : Array[Import]
+  functions : Array[Int32]
+  memories : Array[Limits]
+  global_count : Int32
+  exports : Array[Export]
+  data_segment_count : Int32
+  // private fields
+}
+pub fn Module::export_type(Self, String) -> FuncType?
+pub fn Module::features(Self) -> Array[Feature]
+pub fn Module::for_js(Self, Int32) -> Bytes raise DecodeError
+pub fn Module::function_type(Self, Int32) -> FuncType?
+pub fn Module::imported_function_count(Self) -> Int32
+pub fn Module::imported_global_count(Self) -> Int32
+pub fn Module::imports_memory(Self) -> Bool
+pub fn Module::memory(Self) -> Limits?
+pub fn Module::parse(Bytes) -> Self raise DecodeError
+pub fn Module::uses_globals(Self) -> Bool raise DecodeError
+
+pub(all) struct Section {
+  id : Int32
+  start : Int32
+  end : Int32
+} derive(Eq, @debug.Debug)
+pub fn Section::equal(Self, Self) -> Bool
+pub fn Section::not_equal(Self, Self) -> Bool
+pub fn Section::to_repr(Self) -> @debug.Repr
+
+pub(all) enum ValType {
+  I32
+  I64
+  F32
+  F64
+  V128
+  FuncRef
+  ExternRef
+  Other(Int32)
+} derive(Eq, @debug.Debug)
+pub fn ValType::equal(Self, Self) -> Bool
+pub fn ValType::not_equal(Self, Self) -> Bool
+pub fn ValType::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits

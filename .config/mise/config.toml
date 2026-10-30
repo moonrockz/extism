@@ -111,6 +111,18 @@ run = "moonx scripts/toolchain.mbtx scripts/site.mbtx check"
 description = "Build the docs site and serve it at http://127.0.0.1:4173/extism/ (args: --port <n>)"
 run = "moonx scripts/toolchain.mbtx scripts/site.mbtx serve"
 
+[tasks."build:kernel"]
+description = "Build the Zig kernel to wasm32-freestanding and write pkgs/extism/kernel/kernel_bytes.mbt"
+run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx build"
+
+[tasks."check:kernel"]
+description = "Fail when pkgs/extism/kernel/kernel_bytes.mbt differs from a fresh build of kernel/src"
+run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx check"
+
+[tasks."test:kernel"]
+description = "Run the Zig tests of the kernel"
+run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx test"
+
 [tasks.check]
 description = "Run lint, validate, OpenSpec validation, tests, task script tests, builds and the site check"
 run = "moonx scripts/toolchain.mbtx scripts/check.mbtx"
