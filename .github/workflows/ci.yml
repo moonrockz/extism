@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every base branch, so that a stacked pull request runs CI too.
   pull_request:
-    branches: [main]
   merge_group:
   workflow_dispatch:
 

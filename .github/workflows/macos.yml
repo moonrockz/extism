@@ -4,7 +4,6 @@ name: macOS
 # this workflow changes, and on request, so it is not a required check.
 on:
   pull_request:
-    branches: [main]
     paths:
       - kernel/**
       - pkgs/extism/kernel/**
