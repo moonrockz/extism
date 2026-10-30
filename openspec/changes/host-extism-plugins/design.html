@@ -177,8 +177,8 @@ or store of <var>n</var> bytes at offset <var>p</var> runs only when <var>p</var
 <var>p</var> + <var>n</var> ≤ the memory size. Otherwise a load returns 0 and a store does nothing; neither traps.
 On every offset where upstream does not trap, the result is the upstream result. Where upstream traps because
 <var>p</var> + <var>n</var> is larger than the memory size (for example <code>load_u8</code> at the memory size),
-or because a block walk reads past the memory, the Zig kernel returns 0 or does nothing. The differential test of
-<a href="#krn-2">KRN-2</a> uses only sequences on which upstream does not trap.</p>
+or because a block walk reads past the memory, the Zig kernel returns 0 or does nothing. Where upstream traps, the differential test of
+<a href="#krn-2">KRN-2</a> checks that the Zig kernel traps or gives 0, and then starts both kernels again.</p>
 <p>The kernel has no stack and no data in its linear memory: the module has no data segment, the build sets the
 stack size to 0, and no kernel function takes the address of a local or returns a value through memory (the block
 functions return offset 0 for no block, not an optional). So a plugin <code>store_*</code> can change only the
