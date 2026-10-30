@@ -111,9 +111,85 @@ run = "moonx scripts/toolchain.mbtx scripts/site.mbtx check"
 description = "Build the docs site and serve it at http://127.0.0.1:4173/extism/ (args: --port <n>)"
 run = "moonx scripts/toolchain.mbtx scripts/site.mbtx serve"
 
+[tasks."build:kernel"]
+description = "Build the Zig kernel to wasm32-freestanding and write pkgs/extism/kernel/kernel_bytes.mbt"
+run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx build"
+
+[tasks."check:kernel"]
+description = "Fail when pkgs/extism/kernel/kernel_bytes.mbt differs from a fresh build of kernel/src"
+run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx check"
+
+[tasks."test:kernel"]
+description = "Run the Zig tests of the kernel"
+run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx test"
+
+[tasks."qualify:engine"]
+description = "Run the EXT-2 engine gate: the Python extension 0.4.2 compile on the native engine, with a receipt (args: --json)"
+run = "moonx scripts/toolchain.mbtx scripts/qualify.mbtx"
+
+[tasks."vendor:wamr"]
+description = "Vendor the WAMR and SIMDe sources from checkouts at the pinned commits into pkgs/extism/engine/wamr (args: wamr-checkout simde-checkout)"
+run = "moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx"
+
+[tasks."check:wamr"]
+description = "Compare each vendored WAMR and SIMDe file with its SHA-256 in pkgs/extism/engine/wamr/UPSTREAM.md"
+run = "moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx check"
+
+[tasks."check:consumer"]
+description = "Build and run a fresh consumer of moonrockz/extism outside the repository (args: targets; default: native js)"
+run = "moonx scripts/toolchain.mbtx scripts/consumer.mbtx"
+
+[tasks."test:moonbit-guest"]
+description = "Check that the portable MoonBit MEP guest (model.wasm, with SIMD) answers describe on native and js (args: path of model.wasm)"
+run = "moonx scripts/toolchain.mbtx scripts/moonbit-guest.mbtx"
+
+[tasks."test:python"]
+description = "Check that the Python extension 0.4.1 and 0.4.2 give the pinned info and describe responses on native and js (args: --browser)"
+run = "moonx scripts/toolchain.mbtx scripts/python.mbtx"
+
+[tasks."test:engine"]
+description = "Run the engine tests one at a time with a time limit each, printing each name first (args: target, seconds)"
+run = "moonx scripts/toolchain.mbtx scripts/test-engine.mbtx"
+
+[tasks."test:switch-dispatch"]
+description = "Run the native engine tests with the switch dispatch of WAMR, as a compiler with no computed goto (MSVC) builds it"
+run = "moonx scripts/toolchain.mbtx scripts/switch-dispatch.mbtx"
+
 [tasks.check]
 description = "Run lint, validate, OpenSpec validation, tests, task script tests, builds and the site check"
 run = "moonx scripts/toolchain.mbtx scripts/check.mbtx"
+
+[tasks."release:plan"]
+description = "Decide whether a Release workflow run releases (CI)"
+run = "moonx scripts/toolchain.mbtx scripts/release.mbtx plan"
+
+[tasks."release:package"]
+description = "Package moonrockz/extism, audit the archive and record its SHA-256 in _build/publish/checksums.json"
+run = "moonx scripts/toolchain.mbtx scripts/package.mbtx"
+
+[tasks."release:policy"]
+description = "Check the publication policy: pkgs/extism is the only public module"
+run = "moonx scripts/toolchain.mbtx scripts/publish.mbtx --check"
+
+[tasks."release:credentials"]
+description = "Write mooncakes.io credentials from MOONCAKES_USER_TOKEN (CI only)"
+run = "moonx scripts/toolchain.mbtx scripts/credentials.mbtx"
+
+[tasks."release:publish"]
+description = "Publish moonrockz/extism to mooncakes.io; an already published version counts as done (CI only)"
+run = "moonx scripts/toolchain.mbtx scripts/publish.mbtx"
+
+[tasks."check:published"]
+description = "Release gate: verify the public moonrockz/extism archive against the release:package checksum"
+run = "moonx scripts/toolchain.mbtx scripts/package.mbtx --published"
+
+[tasks."release:notes"]
+description = "Print the CHANGELOG.md section of a version (args: X.Y.Z)"
+run = "moonx scripts/toolchain.mbtx scripts/release.mbtx notes"
+
+[tasks."release:github"]
+description = "Create the GitHub release vX.Y.Z unless it exists (args: X.Y.Z NOTES_FILE; CI only)"
+run = "moonx scripts/toolchain.mbtx scripts/release.mbtx github"
 
 [tasks.clean]
 description = "Remove build artifacts"

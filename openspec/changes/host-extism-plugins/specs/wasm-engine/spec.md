@@ -51,13 +51,35 @@ instances come from one compiled module.
   different instances A1 and A2
 - **THEN** a call of `alloc` in the first B instance changes only A1's memory, and in the second only A2's memory
 
+### Requirement: Start function as a bounded call
+Both engines SHALL run the start function of a module after the instance exists, as a call with the budget and
+the deadline that the instantiation gets, and SHALL make the instantiation fail with a start error that holds the
+call error when it fails. A host function that the start function calls SHALL see the memory of the instance.
+
+#### Scenario: Start function sees the memory
+- **WHEN** a module's start function calls a host function that reads the caller's memory, on either engine
+- **THEN** the host function gets the memory, the start function runs one time, and the instance is usable
+
+#### Scenario: Start function trap
+- **WHEN** a module's start function traps, on either engine
+- **THEN** the instantiation fails with a start error that holds the trap kind
+
+#### Scenario: Start function under the deadline
+- **WHEN** a module's start function loops forever, on native with a deadline or a budget
+- **THEN** the instantiation fails with a start error that holds `Interrupted` or `BudgetExhausted`
+
 ### Requirement: Guest memory access
-The engine SHALL let a host function and the caller read and write the exported memory of an instance by offset
-and length. An access outside the current memory size SHALL raise an error and SHALL NOT read or write any byte.
+The engine SHALL let a host function and the caller read and write the memory of an instance by offset and
+length, on both engines, whether or not the module exports its memory. An access outside the current memory size
+SHALL raise an error and SHALL NOT read or write any byte.
 
 #### Scenario: Read past the end
 - **WHEN** a host function reads 8 bytes at 4 bytes before the end of guest memory
 - **THEN** the read raises an out-of-bounds error and no bytes are returned
+
+#### Scenario: Memory that the module does not export
+- **WHEN** a WASI plugin whose module does not export its memory writes to stdout, on native and on js
+- **THEN** the stdout sink gets the bytes on both engines
 
 ### Requirement: Memory ceiling
 Each instance SHALL have a memory ceiling in 64 KiB pages, also when the module declares no maximum or a larger
@@ -82,7 +104,8 @@ than the initial pages of the module's memory SHALL fail the instantiation. The 
 ### Requirement: Instruction budget
 Where the engine meters instructions, a call SHALL stop with a budget error when it runs more instructions than
 its budget. The native engine SHALL meter instructions. The js engine does not meter. A budget SHALL be from 1 to
-2147483647 instructions, the range of the C `int` that WAMR takes.
+2147483647 instructions, the range of the C `int` that WAMR takes. The native engine SHALL enforce the budget with every C
+compiler that builds it, including MSVC.
 
 #### Scenario: Budget range
 - **WHEN** a caller makes a budget of 2147483647 and a budget of 2147483648
@@ -91,6 +114,11 @@ its budget. The native engine SHALL meter instructions. The js engine does not m
 #### Scenario: Runaway loop on native
 - **WHEN** a guest loops forever in a call with a budget of 1,000,000 instructions on native
 - **THEN** the call stops with a budget error and the instance is not usable for more calls
+
+#### Scenario: Budget with every C compiler
+- **WHEN** the native engine is built with a C compiler that has no computed goto, such as MSVC, and a guest loops
+  forever in a call with a budget of 1,000,000 instructions
+- **THEN** the call stops with a budget error, as with a compiler that has computed goto
 
 ### Requirement: Interruption
 Where the engine supports it, a call SHALL stop with an interruption error when its deadline passes. The native
@@ -121,14 +149,23 @@ enforced or not enforced. A caller SHALL be able to read the report before it ru
 
 ### Requirement: Feature errors
 The engine SHALL refuse at load a module that needs a WASM feature that the engine does not support, with an
-error that names the feature from a closed set, for example `simd`, `threads`, `memory64`, `exception-handling`
-or `gc`. When the engine cannot name the feature, the error SHALL say that it is unknown. Both engines SHALL
+error that names the feature from a closed set, for example `simd`, `threads`, `memory64`, `multi-memory`,
+`exception-handling` or `gc`. When the engine cannot name the feature, the error SHALL say that it is unknown. Both engines SHALL
 find the feature with the same pure scan of the module bytes, so that the native and the js engine name the same
 feature.
 
-#### Scenario: SIMD module on an engine built without SIMD
-- **WHEN** a module with a `v128` instruction loads on an engine built without SIMD
-- **THEN** the load fails with a feature error that names `simd`, before any call
+#### Scenario: SIMD on both engines
+- **WHEN** a module with `v128` instructions loads and runs on the native and on the js engine
+- **THEN** both engines give `simd` in their feature set, and the calls give the same results
+
+#### Scenario: Feature that the engine does not support
+- **WHEN** a module with a shared memory loads on either engine
+- **THEN** the load fails with a feature error that names `threads`, before any call
+
+#### Scenario: Multiple memories
+- **WHEN** a module with two memories, or with a memory index other than 0 in an instruction, loads on the
+  native or the js engine
+- **THEN** the load fails on both engines with the same feature error, which names `multi-memory`
 
 #### Scenario: Feature scan
 - **WHEN** the scan reads a module with a `v128` instruction, a shared memory and a 64-bit memory

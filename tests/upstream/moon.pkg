@@ -1,0 +1,15 @@
+// The engine and the plugin API run on native and js only.
+supported_targets = "+native+js"
+
+import {
+  "moonbitlang/x/crypto",
+}
+
+import {
+  "moonrockz/extism",
+  "moonrockz/extism/engine",
+  "moonrockz/extism/kernel",
+  "moonrockz/extism/wasi",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+} for "test"

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>moonrockz/extism: Python describe in a browser</title>
+</head>
+<body>
+<h1>Python describe in a browser</h1>
+<p>Choose the WASM modules of the Morphir Python extension 0.4.1 and 0.4.2. The page runs
+<code>morphir_extension_info</code> and <code>describe</code> on the js engine of moonrockz/extism and
+compares the SHA-256 of each response with the pinned value.</p>
+<p><label>0.4.1 <input id="v041" type="file" accept=".wasm"></label></p>
+<p><label>0.4.2 <input id="v042" type="file" accept=".wasm"></label></p>
+<pre id="result">waiting</pre>
+<script src="extism-browser.js"></script>
+<script src="check.js"></script>
+</body>
+</html>

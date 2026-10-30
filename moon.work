@@ -2,4 +2,6 @@ members = [
   ".",
   "./pkgs/extism",
   "./apps/site",
+  "./apps/qualify",
+  "./tests",
 ]

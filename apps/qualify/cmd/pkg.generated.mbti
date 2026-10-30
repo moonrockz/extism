@@ -1,0 +1,18 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonrockz/extism-qualify/cmd"
+
+// Values
+
+// Errors
+type GateError
+
+type UsageError
+
+// Types and methods
+type Options
+
+type Session
+
+// Type aliases
+
+// Traits

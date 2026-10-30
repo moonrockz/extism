@@ -1,0 +1,274 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Publish `moonrockz/extism` to mooncakes.io (CI only), ported from moonrockz/moon-lander. A version
+/// that mooncakes.io already holds counts as published, so a re-run of the same release succeeds; the
+/// public archive checksum gate (`mise run check:published`) then proves that it is the same archive.
+/// Needs the credentials that `scripts/credentials.mbtx` writes.
+///
+/// - `--check` checks the publication policy only: `pkgs/extism` is the public module
+///   `moonrockz/extism` with no local dependency, and every other workspace member is private.
+/// - `--list` checks the policy and prints the folder and the name of the published module.
+///
+/// Usage: `mise run release:publish`, or `moonx scripts/toolchain.mbtx scripts/publish.mbtx
+/// [--check | --list]`. It exits with 0 on success, 1 on failure and 2 on a usage error.
+
+///|
+/// The folder of the only published module.
+let publish_folder : String = "pkgs/extism"
+
+///|
+/// The name of the only published module.
+let publish_name : String = "moonrockz/extism"
+
+///|
+let duplicated : String = "is duplicated with an existing version"
+
+///|
+priv enum Outcome {
+  Published
+  AlreadyPublished
+  Transient
+  Failed
+} derive(Eq, Debug)
+
+///|
+/// A refusal (401, 403) or conflict (409) is never retried.
+fn is_transient(exit_code : Int32, output : String) -> Bool {
+  if exit_code == 0 {
+    return false
+  }
+  let text = output.to_lower()
+  if ["401", "403", "409"].any(word => text.contains(word)) {
+    return false
+  }
+  [
+    "timed out", "timeout", "connection reset", "connection refused", "temporary failure",
+    "eof", "502", "503", "504", "rate limit",
+  ].any(word => text.contains(word))
+}
+
+///|
+fn classify(exit_code : Int32, output : String) -> Outcome {
+  if exit_code == 0 {
+    Published
+  } else if output.contains(duplicated) {
+    AlreadyPublished
+  } else if is_transient(exit_code, output) {
+    Transient
+  } else {
+    Failed
+  }
+}
+
+///|
+fn field(manifest : String, key : String) -> String? {
+  for line in manifest.split("\n") {
+    let line = line.trim()
+    if line.has_prefix(key + " = ") {
+      return Some(
+        line
+        .to_owned()
+        .replace_all(old=key + " = ", new="")
+        .replace_all(old="\"", new=""),
+      )
+    }
+  }
+  None
+}
+
+///|
+/// The member paths of `moon.work`, without a leading `./`.
+fn members(work : String) -> Array[String] {
+  work
+  .split("\n")
+  .filter_map(line => {
+    let parts = line.trim().split("\"").collect()
+    guard parts.length() >= 3 && parts[0].is_empty() else { None }
+    let path = parts[1].to_owned()
+    Some(if path.has_prefix("./") { path[2:].to_owned() } else { path })
+  })
+  .collect()
+}
+
+///|
+/// The publication policy problems of the workspace, given each member path with its manifest.
+fn policy_problems(manifests : Array[(String, String)]) -> Array[String] {
+  let problems = []
+  guard manifests.iter().any(entry => entry.0 == publish_folder) else {
+    return ["\{publish_folder} is not a workspace member"]
+  }
+  for entry in manifests {
+    let (path, manifest) = entry
+    if path == publish_folder {
+      if field(manifest, "name") != Some(publish_name) {
+        problems.push("\{path} is not named \{publish_name}")
+      }
+      if field(manifest, "private") == Some("true") {
+        problems.push("\{path} is private")
+      }
+      if manifest.contains("path:") || manifest.contains("path =") {
+        problems.push("\{path} has a local dependency")
+      }
+    } else if field(manifest, "private") != Some("true") {
+      problems.push("\{path} must be private")
+    }
+  }
+  problems
+}
+
+///|
+async fn output_in(
+  dir : String,
+  cmd : String,
+  args : Array[String],
+) -> (Int32, String) {
+  let (code, out, err) = @process.collect_output(cmd, args, cwd=dir) catch {
+    _ => return (1, "cannot start \{cmd}")
+  }
+  (code, out.text() + err.text())
+}
+
+///|
+/// Retry a transient failure after 5, 20 and 60 seconds.
+async fn with_retry(
+  label : String,
+  action : async () -> (Int32, String),
+) -> (Int32, String) {
+  let mut result = action()
+  for i, wait in [5000, 20000, 60000] {
+    if !is_transient(result.0, result.1) {
+      break
+    }
+    eprintln("↻ \{label}: attempt \{i + 2}/4")
+    @async.sleep(wait)
+    result = action()
+  }
+  result
+}
+
+///|
+fn fail_with(message : String) -> Unit {
+  eprintln("❌ \{message}")
+  @sys.exit(1)
+}
+
+///|
+async fn check_policy() -> Unit {
+  let manifests = []
+  for path in members(@fs.read_file("moon.work").text()) {
+    manifests.push((path, @fs.read_file("\{path}/moon.mod").text()))
+  }
+  let problems = policy_problems(manifests)
+  if !problems.is_empty() {
+    fail_with("Publication policy: \{problems.join("; ")}")
+  }
+}
+
+///|
+async fn main {
+  let args = @env.args()[1:]
+  guard args is [] || args is ["--check"] || args is ["--list"] else {
+    eprintln("Usage: publish.mbtx [--check | --list]")
+    @sys.exit(2)
+    return
+  }
+  check_policy()
+  if args is ["--list"] {
+    println("\{publish_folder} \{publish_name}")
+    return
+  }
+  if args is ["--check"] {
+    println(
+      "Publication policy verified: \{publish_name} is public; every other member is private",
+    )
+    return
+  }
+  guard @env.get_env_var("GITHUB_ACTIONS") == Some("true") &&
+    @env.get_env_var("GITHUB_WORKFLOW") == Some("Release") &&
+    @env.get_env_var("GITHUB_REF_TYPE") == Some("tag") else {
+    fail_with(
+      "Publication is permitted only in the GitHub Actions Release workflow of a tag push",
+    )
+    return
+  }
+  let (update, update_out) = with_retry("update \{publish_name}", () => {
+    output_in(publish_folder, "moon", ["update"])
+  })
+  if update != 0 {
+    fail_with("\{publish_name}: moon update failed\n\{update_out}")
+  }
+  let (code, out) = with_retry("publish \{publish_name}", () => {
+    output_in(publish_folder, "moon", ["publish"])
+  })
+  match classify(code, out) {
+    Published => println("✅ \{publish_name}: published")
+    AlreadyPublished =>
+      println(
+        "\{publish_name}: already exists; the public checksum gate must verify its identity",
+      )
+    Transient | Failed => fail_with("\{publish_name}: publish failed\n\{out}")
+  }
+}
+
+///|
+test "publish outcomes distinguish duplicates, transient and refused failures" {
+  assert_eq(classify(0, ""), Published)
+  assert_eq(
+    classify(1, "version 0.1.0 is duplicated with an existing version"),
+    AlreadyPublished,
+  )
+  assert_eq(classify(1, "connection reset by peer"), Transient)
+  assert_eq(classify(1, "HTTP 403 timeout"), Failed)
+  assert_eq(classify(1, "invalid module"), Failed)
+}
+
+///|
+test "the members of moon.work are its quoted paths" {
+  assert_eq(
+    members(
+      "members = [\n  \".\",\n  \"./pkgs/extism\",\n  // \"./old\",\n  \"apps/site\",\n]\n",
+    ),
+    [".", "pkgs/extism", "apps/site"],
+  )
+}
+
+///|
+test "the policy publishes pkgs/extism only and keeps every other member private" {
+  let library = "name = \"moonrockz/extism\"\nversion = \"0.1.0\"\n"
+  let private_ = (name : String) => "name = \"\{name}\"\nprivate = true\n"
+  let good = [
+    (".", private_("moonrockz/extism-workspace")),
+    ("pkgs/extism", library),
+    ("apps/site", private_("moonrockz/extism-site")),
+  ]
+  assert_eq(policy_problems(good), [])
+  assert_eq(policy_problems([good[0], good[2]]), [
+    "pkgs/extism is not a workspace member",
+  ])
+  assert_eq(
+    policy_problems([..good, ("tests", "name = \"moonrockz/extism-tests\"\n")]),
+    ["tests must be private"],
+  )
+  assert_eq(
+    policy_problems([
+      good[0],
+      ("pkgs/extism", "name = \"moonrockz/other\"\nprivate = true\n"),
+    ]),
+    ["pkgs/extism is not named moonrockz/extism", "pkgs/extism is private"],
+  )
+  assert_eq(
+    policy_problems([
+      ("pkgs/extism", library + "import { \"x/y\" @ { path: \"../y\" } }\n"),
+    ]),
+    ["pkgs/extism has a local dependency"],
+  )
+}

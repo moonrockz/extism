@@ -1,11 +1,250 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "moonrockz/extism/engine"
 
+import {
+  "moonbitlang/core/debug",
+  "moonrockz/extism/wasi",
+}
+
 // Values
+pub fn host_entry_count() -> Int32
+
+pub fn live_watchdogs() -> Int32
 
 // Errors
+pub(all) suberror CallError {
+  Trap(TrapKind)
+  BudgetExhausted
+  Interrupted
+  MemoryLimit
+  Host(HostError)
+  UnknownExport(String)
+  ArgumentMismatch(String, String)
+  Unusable
+} derive(@debug.Debug)
+pub fn CallError::to_repr(Self) -> @debug.Repr
+
+pub suberror EngineError {
+  Invalid(String)
+  FeatureUnsupported(Feature)
+  LinkError(String, String)
+  CeilingBelowInitial(Int32, Int32)
+  Start(CallError)
+} derive(@debug.Debug)
+pub fn EngineError::to_repr(Self) -> @debug.Repr
+
+pub(all) suberror HostError {
+  HostError(String)
+  Exit(Int32)
+} derive(Eq, @debug.Debug)
+pub fn HostError::equal(Self, Self) -> Bool
+pub fn HostError::not_equal(Self, Self) -> Bool
+pub fn HostError::to_repr(Self) -> @debug.Repr
+
+pub suberror LimitError {
+  LimitError(String, Int64, String)
+}
+
+pub(all) suberror MemoryError {
+  OutOfBounds(Int64, Int32)
+} derive(Eq, @debug.Debug)
+pub fn MemoryError::equal(Self, Self) -> Bool
+pub fn MemoryError::not_equal(Self, Self) -> Bool
+pub fn MemoryError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+pub(all) enum Bound {
+  Enforced
+  NotEnforced
+} derive(Eq, @debug.Debug)
+pub fn Bound::equal(Self, Self) -> Bool
+pub fn Bound::not_equal(Self, Self) -> Bool
+pub fn Bound::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Bounds {
+  memory : Bound
+  budget : Bound
+  interruption : Bound
+} derive(Eq, @debug.Debug)
+pub fn Bounds::equal(Self, Self) -> Bool
+pub fn Bounds::not_equal(Self, Self) -> Bool
+pub fn Bounds::to_repr(Self) -> @debug.Repr
+
+pub struct Budget {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn Budget::equal(Self, Self) -> Bool
+pub fn Budget::instructions(Self) -> Int32
+pub fn Budget::not_equal(Self, Self) -> Bool
+pub fn Budget::parse(Int64) -> Self raise LimitError
+pub fn Budget::to_repr(Self) -> @debug.Repr
+
+pub struct Caller {
+  // private fields
+}
+pub fn Caller::memory(Self) -> Memory?
+
+pub struct Deadline {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn Deadline::equal(Self, Self) -> Bool
+pub fn Deadline::milliseconds(Self) -> Int32
+pub fn Deadline::not_equal(Self, Self) -> Bool
+pub fn Deadline::parse(Int32) -> Self raise LimitError
+pub fn Deadline::to_repr(Self) -> @debug.Repr
+
+pub struct Engine {
+  // private fields
+}
+pub fn Engine::bounds(Self) -> Bounds
+pub fn Engine::compile(Self, Bytes) -> Module raise EngineError
+pub fn Engine::default() -> Self
+pub fn Engine::features(Self) -> Array[Feature]
+
+pub(all) struct ExportDescriptor {
+  name : String
+  kind : ExternKind
+} derive(Eq, @debug.Debug)
+pub fn ExportDescriptor::equal(Self, Self) -> Bool
+pub fn ExportDescriptor::not_equal(Self, Self) -> Bool
+pub fn ExportDescriptor::to_repr(Self) -> @debug.Repr
+
+pub(all) enum ExternKind {
+  Function(Signature?)
+  Table
+  Memory
+  Global
+  Tag
+} derive(Eq, @debug.Debug)
+pub fn ExternKind::equal(Self, Self) -> Bool
+pub fn ExternKind::not_equal(Self, Self) -> Bool
+pub fn ExternKind::to_repr(Self) -> @debug.Repr
+
+pub(all) enum Feature {
+  Simd
+  Threads
+  Memory64
+  ExceptionHandling
+  Gc
+  TailCall
+  MultiMemory
+  Unknown(String)
+} derive(Eq, @debug.Debug)
+pub fn Feature::equal(Self, Self) -> Bool
+pub fn Feature::name(Self) -> String
+pub fn Feature::not_equal(Self, Self) -> Bool
+pub fn Feature::scan(Bytes) -> Array[Self] raise EngineError
+pub fn Feature::to_repr(Self) -> @debug.Repr
+
+pub struct Function {
+  // private fields
+}
+pub fn Function::signature(Self) -> Signature
+
+pub(all) struct ImportDescriptor {
+  module_ : String
+  name : String
+  kind : ExternKind
+} derive(Eq, @debug.Debug)
+pub fn ImportDescriptor::equal(Self, Self) -> Bool
+pub fn ImportDescriptor::not_equal(Self, Self) -> Bool
+pub fn ImportDescriptor::to_repr(Self) -> @debug.Repr
+
+pub struct Imports {
+  // private fields
+}
+pub fn Imports::function(Self, String, String, Function) -> Self
+pub fn Imports::host(Self, String, String, Signature, (Caller, Array[Value]) -> Array[Value] raise HostError) -> Self
+pub fn Imports::new() -> Self
+
+pub struct Instance {
+  // private fields
+}
+pub fn Instance::call(Self, String, Array[Value], budget? : Budget, deadline? : Deadline) -> Array[Value] raise CallError
+pub fn Instance::export_function(Self, String) -> Function?
+pub fn Instance::has_function(Self, String) -> Bool
+pub fn Instance::is_usable(Self) -> Bool
+pub fn Instance::memory(Self) -> Memory?
+pub fn Instance::take_refused_grow(Self) -> Bool
+
+type InstanceHandle
+
+pub struct Memory {
+  // private fields
+}
+pub fn Memory::read(Self, Int64, Int32) -> Bytes raise MemoryError
+pub fn Memory::size(Self) -> Int64
+pub fn Memory::write(Self, Int64, BytesView) -> Unit raise MemoryError
+pub impl @wasi.GuestMemory for Memory
+
+pub struct Module {
+  // private fields
+}
+pub fn Module::exports(Self) -> Array[ExportDescriptor]
+pub fn Module::imports(Self) -> Array[ImportDescriptor]
+pub fn Module::initial_pages(Self) -> Int32?
+pub fn Module::instantiate(Self, Imports, memory_ceiling? : PageCount, budget? : Budget, deadline? : Deadline) -> Instance raise EngineError
+
+type ModuleHandle
+
+pub struct PageCount {
+  // private fields
+} derive(Eq, @debug.Debug)
+pub fn PageCount::default_ceiling() -> Self
+pub fn PageCount::equal(Self, Self) -> Bool
+pub fn PageCount::not_equal(Self, Self) -> Bool
+pub fn PageCount::pages(Self) -> Int32
+pub fn PageCount::parse(Int32) -> Self raise LimitError
+pub fn PageCount::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Signature {
+  params : Array[ValueType]
+  results : Array[ValueType]
+} derive(Eq, @debug.Debug)
+pub fn Signature::equal(Self, Self) -> Bool
+pub fn Signature::new(Array[ValueType], Array[ValueType]) -> Self
+pub fn Signature::not_equal(Self, Self) -> Bool
+pub fn Signature::output(Self, &Logger) -> Unit
+pub fn Signature::to_repr(Self) -> @debug.Repr
+pub fn Signature::to_string(Self) -> String
+pub impl Show for Signature
+
+pub(all) enum TrapKind {
+  Unreachable
+  MemoryOutOfBounds
+  DivideByZero
+  IntegerOverflow
+  InvalidConversion
+  StackExhausted
+  IndirectCall
+  TableOutOfBounds
+  Host
+  Other
+} derive(Eq, @debug.Debug)
+pub fn TrapKind::equal(Self, Self) -> Bool
+pub fn TrapKind::not_equal(Self, Self) -> Bool
+pub fn TrapKind::to_repr(Self) -> @debug.Repr
+
+pub(all) enum Value {
+  I32(Int32)
+  I64(Int64)
+  F32(Float)
+  F64(Double)
+} derive(Eq, @debug.Debug)
+pub fn Value::equal(Self, Self) -> Bool
+pub fn Value::not_equal(Self, Self) -> Bool
+pub fn Value::to_repr(Self) -> @debug.Repr
+pub fn Value::value_type(Self) -> ValueType
+
+pub(all) enum ValueType {
+  I32
+  I64
+  F32
+  F64
+} derive(Eq, @debug.Debug)
+pub fn ValueType::equal(Self, Self) -> Bool
+pub fn ValueType::not_equal(Self, Self) -> Bool
+pub fn ValueType::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

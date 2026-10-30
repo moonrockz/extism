@@ -177,8 +177,8 @@ or store of <var>n</var> bytes at offset <var>p</var> runs only when <var>p</var
 <var>p</var> + <var>n</var> ≤ the memory size. Otherwise a load returns 0 and a store does nothing; neither traps.
 On every offset where upstream does not trap, the result is the upstream result. Where upstream traps because
 <var>p</var> + <var>n</var> is larger than the memory size (for example <code>load_u8</code> at the memory size),
-or because a block walk reads past the memory, the Zig kernel returns 0 or does nothing. The differential test of
-<a href="#krn-2">KRN-2</a> uses only sequences on which upstream does not trap.</p>
+or because a block walk reads past the memory, the Zig kernel returns 0 or does nothing. Where upstream traps, the differential test of
+<a href="#krn-2">KRN-2</a> checks that the Zig kernel traps or gives 0, and then starts both kernels again.</p>
 <p>The kernel has no stack and no data in its linear memory: the module has no data segment, the build sets the
 stack size to 0, and no kernel function takes the address of a local or returns a value through memory (the block
 functions return offset 0 for no block, not an optional). So a plugin <code>store_*</code> can change only the
@@ -204,6 +204,15 @@ call sequences (allocate, store, load, free, reuse, input, output, error, reset,
 and on upstream <code>extism-runtime.wasm</code>, both on the js engine, and compares every result and every live
 block. The upstream file is a test fixture with its BSD-3-Clause license and SHA-256; it is not in the published
 package. The js engine accepts its externref global, so the fixture runs unchanged.</p>
+<p>The sequences are generated with the handles that upstream's <code>alloc</code> gives, so later calls reach
+live and freed blocks. They include <code>store_u64</code> and <code>input_load_u64</code>, the offsets at the
+edge of the root record and of 64-bit accesses (56, 57, 63, 64), values near 2^64, and addresses at the end of
+memory. Where upstream traps, the test checks that the Zig kernel traps or gives 0, starts both kernels again
+with the calls before the trap, and goes on. These sequences found three upstream details that the Zig kernel
+now follows: the first initialization clears 144 bytes after the root record (upstream's
+<code>write_bytes</code> counts <code>MemoryBlock</code> values, not bytes); the block walk adds in 32 bits, as
+wasm32 pointers do, so a size that a plugin forges wraps around; and a new block is placed at the position
+modulo 2^32.</p>
 
 <h3 id="eng-1">ENG-1. The engine API (Call)</h3>
 <p>The engine package gives one API with two backends. Names are subject-first and values are typed:</p>
@@ -213,7 +222,7 @@ pub struct Signature { params : Array[ValueType]; results : Array[ValueType] }
 pub struct PageCount(..)     // PageCount::parse(Int) raise LimitError; 1 to 65536
 pub struct Budget(..)        // instructions per call, 1 to 2147483647 (the C int of WAMR)
 pub struct Deadline(..)      // milliseconds per call, more than 0
-pub enum Feature { Simd; Threads; Memory64; ExceptionHandling; Gc; TailCall; Unknown(String) }
+pub enum Feature { Simd; Threads; Memory64; ExceptionHandling; Gc; TailCall; MultiMemory; Unknown(String) }
 pub enum Bound { Enforced; NotEnforced }
 
 pub fn Feature::scan(Bytes) -&gt; Array[Feature] raise EngineError   // pure; both engines use it
@@ -223,7 +232,7 @@ pub fn Engine::bounds(self) -&gt; Bounds                     // memory, budget, 
 pub fn Engine::compile(self, Bytes) -&gt; Module raise EngineError
 pub fn Module::imports(self) -&gt; Array[ImportDescriptor]
 pub fn Module::exports(self) -&gt; Array[ExportDescriptor]
-pub fn Module::instantiate(self, Imports, memory_ceiling~ : PageCount) -&gt; Instance raise EngineError
+pub fn Module::instantiate(self, Imports, memory_ceiling~ : PageCount, budget? : Budget, deadline? : Deadline) -&gt; Instance raise EngineError
 pub fn Instance::call(self, String, Array[Value], budget? : Budget, deadline? : Deadline) -&gt; Array[Value] raise CallError
 pub fn Instance::memory(self) -&gt; Memory?                  // implements @wasi.GuestMemory
 pub fn Instance::export_function(self, String) -&gt; Function?</code></pre>
@@ -231,7 +240,7 @@ pub fn Instance::export_function(self, String) -&gt; Function?</code></pre>
 MoonBit closure (<code>(Caller, Array[Value]) -&gt; Array[Value] raise HostError</code>) or an exported
 <code>Function</code> of another instance. <code>Caller</code> gives the calling instance's memory. Errors are
 closed enums: <code>EngineError</code> (<code>Invalid</code>, <code>FeatureUnsupported(Feature)</code>,
-<code>LinkError</code>, <code>CeilingBelowInitial</code>) and <code>CallError</code> (<code>Trap(TrapKind)</code>,
+<code>LinkError</code>, <code>CeilingBelowInitial</code>, <code>Start(CallError)</code>) and <code>CallError</code> (<code>Trap(TrapKind)</code>,
 <code>BudgetExhausted</code>, <code>Interrupted</code>, <code>MemoryLimit</code>, <code>Host(HostError)</code>,
 <code>UnknownExport</code>). The engine does not know Extism.</p>
 <p>Imports are bound per instance. Two instances of one compiled module can have different closures and
@@ -242,6 +251,19 @@ the engine lacks fails with <code>FeatureUnsupported</code> and the feature name
 gives its set of supported features.</p>
 <p>A ceiling smaller than the initial pages of the module's memory is refused at instantiation with
 <code>CeilingBelowInitial</code>, which holds both page counts, on both engines.</p>
+<p><strong>The prepared module.</strong> Both engines compile the module after a pure rewrite,
+<code>@binary.Module::prepare</code>: it removes the start section and exports the start function under the
+reserved name <code>__moonrockz_extism_start</code>, and it exports memory 0 under the reserved name
+<code>__moonrockz_extism_memory</code>. No index changes. A module that exports a name with the prefix
+<code>__moonrockz_extism_</code> is refused. So no guest code runs inside the engine's instantiation: the
+instantiation makes the instance, sets the <code>Caller</code> of its host functions, and then calls the start
+function as a call with the <code>budget</code> and the <code>deadline</code> that the caller gives. A start
+function that fails makes the instantiation fail with <code>Start</code> and the call error. On js, the memory
+export lets the host reach the memory of a module that does not export <code>memory</code>, as on native. The
+exports that the rewrite adds are not in <code>Module::exports</code>.</p>
+<p>The engine meters guest instructions only. The work of a host function, for example a WASI call or an Extism
+host function, and the block walks of the kernel's forwarders on native, which run in another instance with no
+budget, count against no instruction budget; the deadline bounds them.</p>
 <p>A <code>memory.grow</code> that the ceiling refuses returns -1 to the guest, and the engine records the refusal
 for the current call. When a call then fails, the error is <code>MemoryLimit</code>, not the trap that followed.
 On native the record comes from WAMR's enlarge-memory error callback. On js the memory rewrite of
@@ -255,9 +277,17 @@ and an <code>UPSTREAM.md</code> that records the tag, the commit and the file li
 WAMR's CMake: <code>INTERP=1</code>, <code>FAST_INTERP=1</code>, <code>AOT=0</code>, <code>JIT=0</code>,
 <code>LIBC_BUILTIN=0</code>, <code>LIBC_WASI=0</code> (the sandbox is ours), <code>BULK_MEMORY=1</code>,
 <code>REF_TYPES=1</code>, <code>INSTRUCTION_METERING=1</code>, <code>THREAD_MGR=1</code> (see
-<a href="#eng-4">ENG-4</a>), <code>MULTI_MODULE=0</code> and <code>SIMD</code> as the EXT-2 gate decides. The
-vendored tree keeps WAMR's <code>LICENSE</code> (Apache-2.0 WITH LLVM-exception), and
-<code>pkgs/extism/README.md</code> has a third-party note.</p>
+<a href="#eng-4">ENG-4</a>), <code>MULTI_MODULE=0</code>, <code>SIMD=1</code> and <code>SIMDE=1</code>. The
+vendored tree keeps WAMR's <code>LICENSE</code> (Apache-2.0 WITH LLVM-exception) and <code>ATTRIBUTIONS.md</code>,
+and <code>pkgs/extism/README.md</code> has a third-party note.</p>
+<p><strong>SIMD.</strong> The native engine supports the fixed-width SIMD proposal, as the js engine does, so the
+feature set of both engines is <code>simd</code>. MoonBit guests, for example the portable Morphir MEP extension,
+use <code>v128</code> through <code>moonbitlang/x/crypto</code>, and moonc has no flag to turn it off. WAMR's fast
+interpreter runs SIMD through the SIMDe headers (<code>WASM_ENABLE_SIMDE</code>). The engine vendors the headers
+that <code>simde/wasm/simd128.h</code> includes, from SIMDe <code>v0.8.2</code> (MIT, the version that WAMR's
+CMake fetches), under <code>wamr/simde/</code> with SIMDe's <code>COPYING</code>. Upstream WAMR turns SIMDe off on
+Windows; the third patch below makes the one construct that MSVC does not compile portable, and the Windows MSVC
+run proves the build. A SIMD probe module gives the same lanes on both engines.</p>
 <p>Every host import, the kernel forwarders, the WASI functions and the embedder's functions, is registered with
 <code>wasm_runtime_register_natives_raw</code>. A raw native gets its arguments as an array of 64-bit cells and
 writes its results into the same array, so no <code>invokeNative</code> runs on any platform: no assembler is
@@ -270,6 +300,33 @@ MoonBit closure or the exported function of another instance for each import) on
 <code>wasm_runtime_set_custom_data</code>. A trampoline finds the calling instance from its execution environment,
 reads that table with <code>wasm_runtime_get_custom_data</code> and calls the entry for its import. A test loads
 two plugins from one compiled module and checks that each reaches its own kernel.</p>
+<p><strong>Local patches.</strong> The vendored source is the upstream source, with its includes made relative,
+except for the patches in this list. <code>scripts/vendor-wamr.mbtx</code> applies each one when it vendors WAMR,
+fails when the upstream text does not match exactly once, and lists it in <code>wamr/UPSTREAM.md</code>.</p>
+<ul>
+<li><code>core/iwasm/interpreter/wasm_interp_fast.c</code>, function
+<code>wasm_interp_call_func_bytecode</code>, the <code>WASM_ENABLE_LABELS_AS_VALUES == 0</code> dispatch loop:
+the loop runs <code>CHECK_INSTRUCTION_LIMIT()</code> before each opcode. Reason: a compiler with no computed
+goto (MSVC) builds the switch dispatch, and upstream calls <code>CHECK_INSTRUCTION_LIMIT</code> only in the
+computed-goto <code>FETCH_OPCODE_AND_DISPATCH</code> macro, so the instruction budget is not enforced there.
+Without the patch, "Runaway loop on native" does not end on Windows MSVC (run 41120275074) and in a build with
+<code>WASM_ENABLE_LABELS_AS_VALUES=0</code>; CI runs the engine tests in that build on Linux. Upstream fixed it
+after <code>WAMR-2.4.5</code> in commit <code>ea5dd88e</code> (pull request #5141, issue #5140); the patch goes at
+the next WAMR upgrade.</li>
+<li><code>core/iwasm/interpreter/wasm_interp_fast.c</code>, the SIMDe code: the macro
+<code>SIMD_V128_TO_SIMDE_V128</code> calls a static inline function instead of a GNU statement expression.
+Reason: MSVC does not compile statement expressions, and upstream builds SIMDe on no Windows platform
+(<code>build-scripts/runtime_lib.cmake</code>, at <code>WAMR-2.4.5</code> and at main <code>f8ed1f44</code>).</li>
+<li><code>core/iwasm/interpreter/wasm_runtime.c</code>, function
+<code>execute_post_instantiate_functions</code>: the instantiation does not look up <code>__post_instantiate</code>
+and <code>__wasm_call_ctors</code>; it runs only the wasm start function. Reason: the plugin runs the guest's
+start-up exports itself, as upstream Extism does (<a href="#plg-1">PLG-1</a>), and WAMR ran the constructors a
+second time, with no budget and no deadline. No WAMR setting or API skips these lookups. The test "Constructors
+run once" fails without the patch.</li>
+</ul>
+<p><code>mise run check:wamr</code> compares each vendored file with the SHA-256 that <code>wamr/UPSTREAM.md</code>
+gives for it, after the include rewrite and the patches, and fails on a changed, missing or unlisted file. CI
+runs it in the lint job.</p>
 <p><code>pkgs/extism/engine/wamr/build.zig</code> holds the source list and the defines, the same as the CMake
 selection. It builds and tests WAMR alone with Zig for every CLI platform in CI. It also writes the
 <code>native-stub</code> list and the <code>stub-cc-flags</code> of the engine's <code>moon.pkg</code>; a check
@@ -286,7 +343,8 @@ of the EXT-2 gate.</p>
 <code>extern "js"</code>, so it runs on Node.js and browsers with no package. js has no instruction metering and
 cannot stop a synchronous call on the same thread, so its bounds report gives the budget and interruption as not
 enforced. The memory ceiling is enforced by a pure MoonBit function that rewrites the memory section's maximum to
-the ceiling before compile, as finos/morphir-moonbit does today. Imported memories are refused. The same rewrite
+the ceiling before compile, as finos/morphir-moonbit does today. Imported memories are refused, and a second
+memory is the feature <code>multi-memory</code>, which both engines refuse with the same error. The same rewrite
 appends one function and one global to the module: each <code>memory.grow</code> in a function body calls the
 appended function, which runs <code>memory.grow</code> and sets the global when the result is -1. Appended
 functions and globals take the next free indices, so no other index changes. The engine reads and clears the
@@ -302,8 +360,17 @@ budget.</p>
 when the deadline passes. WAMR is built with <code>WASM_ENABLE_THREAD_MGR=1</code>, so that the fast interpreter
 sees the terminate flag at its <code>CHECK_SUSPEND_FLAGS</code> points, also in a tight loop. The watchdog is always
 cancelled and joined before <code>Instance::call</code> returns: after a normal return, a trap, an exhausted budget
-or a host error. A test runs many short calls with a deadline and checks that no thread is left. There is no
-fallback that reads the metering counter, because WAMR keeps it in a local of the interpreter loop.</p>
+or a host error. The watchdog decides to fire, and records that it fired, under its lock; the call stops and joins
+it before it reads the exception. When the watchdog fired after the guest returned, the call keeps its results and
+clears the exception, so the next call does not see the termination. A test delays the stop of the watchdog after
+the return to make this race certain. Each watchdog thread counts itself at its start and at its end, so a test
+that finds the count above 0 after the calls finds a thread that was not joined. There is no fallback that reads
+the metering counter, because WAMR keeps it in a local of the interpreter loop.</p>
+<p>The host functions of an instance have a range of ids in a table in the MoonBit stub. The table refers to no
+instance: the trampoline gives the host function its calling instance. The finalizer of an instance records its
+range as freed, and the next instantiation removes those entries, so loaded and dropped plugins do not stay in
+memory. Each instance holds a reference on its module in the C stub, so WAMR unloads the module after its last
+instance.</p>
 <p>Where the stub cannot start a thread, or where <code>THREAD_MGR</code> is not viable on a platform, the bounds
 report gives interruption as not enforced by the engine, and only the instruction budget bounds a call there. The
 Morphir host still ends its worker process at its own deadline.</p>
@@ -394,16 +461,21 @@ response headers, or 0</td></tr>
 <tr><td><code>args_sizes_get</code>, <code>args_get</code>, <code>environ_sizes_get</code>,
 <code>environ_get</code></td><td>Zero entries; success</td></tr>
 <tr><td><code>fd_read</code> on fd 0</td><td>0 bytes (end of file)</td></tr>
-<tr><td><code>fd_write</code> on fd 1 and fd 2</td><td>The embedder's sinks; all bytes written</td></tr>
+<tr><td><code>fd_write</code> on fd 1 and fd 2</td><td>The embedder's sinks, one iovec at a time, at most the
+sink's <code>SinkBound</code> per call (1 byte to 16 MiB, 1 MiB by default): the first bytes up to the bound are
+written and reported. More than 1024 iovecs: <code>EINVAL</code> (28). Any range outside guest memory:
+<code>EFAULT</code> (21), checked before a byte goes to the sink</td></tr>
 <tr><td><code>clock_time_get</code>, <code>clock_res_get</code>, <code>random_get</code></td><td>The embedder's
-sources; <code>ENOTCAPABLE</code> (76) without one</td></tr>
+sources; <code>ENOTCAPABLE</code> (76) without one. <code>random_get</code> checks its range against guest memory
+before it calls the source</td></tr>
 <tr><td><code>fd_fdstat_get</code> on fd 0, 1 and 2</td><td>Success: a character device with no flags; the
 rights are <code>fd_read</code> for fd 0 and <code>fd_write</code> for fd 1 and fd 2, and no inheriting
 rights</td></tr>
 <tr><td><code>fd_filestat_get</code> on fd 0, 1 and 2</td><td>Success: a character device with size 0, link count
 0 and all times 0</td></tr>
-<tr><td><code>proc_exit</code></td><td>Ends the call. Code 0 with no error set is a successful call that returns
-its output; any other code is an <code>Exit(code)</code> error</td></tr>
+<tr><td><code>proc_exit</code></td><td>Ends the call with the host error <code>Exit(code)</code>. Code 0 with no
+error set is a successful call that returns its output, and the instance takes more calls, as upstream; any other
+code is an <code>Exit(code)</code> error, and the instance takes no more calls</td></tr>
 <tr><td>Any function with an fd other than 0, 1 and 2</td><td><code>EBADF</code> (8)</td></tr>
 <tr><td>Every other function or operation of the 46 preview 1 functions</td><td><code>ENOTCAPABLE</code> (76)</td></tr>
 </tbody>
@@ -448,8 +520,9 @@ worker.</td></tr>
 test runs many short calls and checks that no thread is left.</td></tr>
 <tr><td>Zig builds of the kernel differ between hosts or Zig releases</td><td><code>check:kernel</code> runs on
 Linux and macOS; Zig is pinned with finos/morphir-moonbit's pin.</td></tr>
-<tr><td>The Python module needs SIMD or another feature that the fast interpreter build lacks</td><td>GATE-1 records
-the feature error with its name; SIMD is enabled only if the fixture needs it and the gate still passes.</td></tr>
+<tr><td>The Python module needs a feature that the fast interpreter build lacks</td><td>GATE-1 records the
+feature error with its name. SIMD is enabled for MoonBit guests, and the gate runs with it on every
+platform.</td></tr>
 <tr><td>A conformant plugin needs a WASI answer other than an error</td><td>The plugin fails with its own
 diagnostic. Fixture plugins built with upstream PDKs exercise the start-up calls; a new answer needs a reviewed
 change to WASI-1.</td></tr>

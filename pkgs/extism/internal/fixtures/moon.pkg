@@ -1,0 +1,2 @@
+// Small WASM modules for the tests of the engine and the plugin API. Each module is in hex, with
+// its WAT source beside it; `wasm-tools parse` gives the bytes. Bytes have no target, so it supports all four.

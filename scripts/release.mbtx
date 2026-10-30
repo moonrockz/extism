@@ -1,0 +1,466 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// The steps of the Release workflow, ported from moonrockz/moon-lander.
+///
+/// - `plan` decides whether this run releases and writes `release`, `dry_run`, `version` and `tag`
+///   to `$GITHUB_OUTPUT`.
+/// - `notes X.Y.Z` prints the CHANGELOG.md section of that version.
+/// - `github X.Y.Z NOTES [ASSET...]` creates the GitHub release `vX.Y.Z` at the checked out commit.
+///   An existing release or tag needs owner action: the script never replaces one.
+///
+/// Usage: `mise run release:plan`, `mise run release:notes -- X.Y.Z`,
+/// `mise run release:github -- X.Y.Z NOTES`, or `moonx scripts/toolchain.mbtx scripts/release.mbtx ...`.
+/// It exits with 0 on success, 1 on failure and 2 on a usage error.
+
+///|
+/// The rule that a release input breaks.
+priv enum InputRule {
+  VersionComponents
+  VersionDigits
+  VersionLeadingZero
+} derive(Eq, Debug)
+
+///|
+
+///|
+fn InputRule::describe(self : InputRule) -> String {
+  match self {
+    VersionComponents => "a version has three components"
+    VersionDigits => "a version component is digits"
+    VersionLeadingZero => "a version component has no leading zero"
+  }
+}
+
+///|
+priv suberror InputError {
+  InvalidInput(input~ : String, rule~ : InputRule)
+} derive(Debug)
+
+///|
+/// A release version `X.Y.Z`, with no leading zero in a component.
+priv struct ReleaseVersion {
+  text : String
+} derive(Eq, Debug)
+
+///|
+fn ReleaseVersion::parse(input : String) -> ReleaseVersion raise InputError {
+  let parts = input.split(".").collect()
+  guard parts.length() == 3 else {
+    raise InvalidInput(input~, rule=VersionComponents)
+  }
+  for part in parts {
+    guard !part.is_empty() && part.iter().all(c => c >= '0' && c <= '9') else {
+      raise InvalidInput(input~, rule=VersionDigits)
+    }
+    guard part.length() == 1 || !part.has_prefix("0") else {
+      raise InvalidInput(input~, rule=VersionLeadingZero)
+    }
+  }
+  { text: input, }
+}
+
+///|
+fn ReleaseVersion::tag(self : ReleaseVersion) -> String {
+  "v\{self.text}"
+}
+
+///|
+/// The ref that started the run: a tag or a branch, with its name.
+priv enum RunRef {
+  Tag(String)
+  Branch(String)
+}
+
+///|
+fn RunRef::parse(ref_type : String, ref_name : String) -> RunRef {
+  if ref_type == "tag" {
+    Tag(ref_name)
+  } else {
+    Branch(ref_name)
+  }
+}
+
+///|
+fn RunRef::name(self : RunRef) -> String {
+  match self {
+    Tag(name) | Branch(name) => name
+  }
+}
+
+///|
+priv enum Plan {
+  Release(ReleaseVersion)
+  DryRun(ReleaseVersion)
+  Skip(String)
+} derive(Eq, Debug)
+
+///|
+/// A pull request run and a `dry_run` only check. Any other run releases only from the push of the
+/// tag that names the moon.mod version, on a commit of main; an existing GitHub release is done; a
+/// release needs its CHANGELOG.md section.
+fn plan(
+  pull_request~ : Bool,
+  run_ref~ : RunRef,
+  on_main~ : Bool,
+  dry_run~ : Bool,
+  version~ : ReleaseVersion,
+  released~ : Bool,
+  has_section~ : Bool,
+) -> Result[Plan, String] {
+  if pull_request || dry_run {
+    return Ok(DryRun(version))
+  }
+  let tag = version.tag()
+  guard run_ref is Tag(name) else {
+    return Err(
+      "\{run_ref.name()} is not a tag; a release runs only from the push of \{tag}",
+    )
+  }
+  if name != tag {
+    return Err(
+      "tag \{name} does not match the moon.mod version \{version.text}",
+    )
+  }
+  if !on_main {
+    return Err("\{run_ref.name()} is not on main")
+  }
+  if released {
+    return Ok(Skip("\{tag} is already released"))
+  }
+  if !has_section {
+    return Err("CHANGELOG.md has no section for \{version.text}")
+  }
+  Ok(Release(version))
+}
+
+///|
+fn Plan::outputs(self : Plan) -> String {
+  match self {
+    Release(v) =>
+      "release=true\ndry_run=false\nversion=\{v.text}\ntag=\{v.tag()}\n"
+    DryRun(v) =>
+      "release=false\ndry_run=true\nversion=\{v.text}\ntag=\{v.tag()}\n"
+    Skip(_) => "release=false\ndry_run=false\n"
+  }
+}
+
+///|
+/// The body of `## X.Y.Z` up to the next `## ` heading.
+fn changelog_section(text : String, version : ReleaseVersion) -> String? {
+  let heading = "## \{version.text}"
+  let lines = text.split("\n").map(line => line.to_owned()).collect()
+  guard lines.search_by(line => {
+      line == heading || line.has_prefix(heading + " ")
+    })
+    is Some(start) else {
+    return None
+  }
+  let body = []
+  for line in lines[start + 1:] {
+    if line.has_prefix("## ") {
+      break
+    }
+    body.push(line)
+  }
+  Some(body.join("\n").trim().to_owned())
+}
+
+///|
+fn module_version(manifest : String) -> String? {
+  for line in manifest.split("\n") {
+    if line.has_prefix("version = \"") {
+      let rest = line[11:]
+      if rest.find("\"") is Some(end) {
+        return Some(rest[:end].to_owned())
+      }
+    }
+  }
+  None
+}
+
+///|
+fn fail_with(message : String) -> Unit {
+  eprintln("❌ \{message}")
+  @sys.exit(1)
+}
+
+///|
+async fn output_of(cmd : String, args : Array[String]) -> (Int32, String) {
+  let (code, out, err) = @process.collect_output(cmd, args) catch {
+    _ => return (1, "cannot start \{cmd}")
+  }
+  (code, out.text() + err.text())
+}
+
+///|
+/// Check the remote, because a shallow checkout need not contain its tags.
+async fn require_absent_tag(tag : String) -> Unit {
+  let (code, out) = output_of("git", [
+    "ls-remote",
+    "--exit-code",
+    "--tags",
+    "origin",
+    "refs/tags/\{tag}",
+  ])
+  if code == 0 {
+    fail_with("\{tag} already exists; owner action is required")
+  } else if code != 2 {
+    fail_with("cannot check the remote tag \{tag}: \{out}")
+  }
+}
+
+///|
+async fn read_version() -> ReleaseVersion {
+  guard module_version(@fs.read_file("moon.mod").text()) is Some(text) else {
+    fail_with("moon.mod has no version")
+    panic()
+  }
+  ReleaseVersion::parse(text) catch {
+    InvalidInput(input~, rule~) => {
+      fail_with("moon.mod version \{input} breaks the rule: \{rule.describe()}")
+      panic()
+    }
+  }
+}
+
+///|
+async fn run_plan() -> Unit {
+  let version = read_version()
+  let env = (name : String) => @env.get_env_var(name).unwrap_or("")
+  let pull_request = env("GITHUB_EVENT_NAME") == "pull_request"
+  let run_ref = RunRef::parse(env("GITHUB_REF_TYPE"), env("GITHUB_REF_NAME"))
+  let dry_run = env("DRY_RUN") == "true"
+  let has_section = changelog_section(
+      @fs.read_file("CHANGELOG.md").text(),
+      version,
+    )
+    is Some(_)
+  let mut on_main = false
+  let mut released = false
+  if !pull_request && !dry_run {
+    let (fetched, out) = output_of("git", ["fetch", "--quiet", "origin", "main"])
+    if fetched != 0 {
+      fail_with("git fetch origin main failed: \{out}")
+    }
+    let (code, out) = output_of("git", [
+      "merge-base", "--is-ancestor", "HEAD", "origin/main",
+    ])
+    on_main = match code {
+      0 => true
+      1 => false
+      _ => {
+        fail_with("cannot tell whether HEAD is on main: \{out}")
+        false
+      }
+    }
+    let (viewed, _) = output_of("gh", ["release", "view", version.tag()])
+    released = viewed == 0
+  }
+  match
+    plan(
+      pull_request~,
+      run_ref~,
+      on_main~,
+      dry_run~,
+      version~,
+      released~,
+      has_section~,
+    ) {
+    Err(message) => fail_with(message)
+    Ok(p) => {
+      println(
+        match p {
+          Release(v) => "Release \{v.text}"
+          DryRun(v) => "Dry run for \{v.text}"
+          Skip(reason) => "Skip: \{reason}"
+        },
+      )
+      let outputs = p.outputs()
+      if @env.get_env_var("GITHUB_OUTPUT") is Some(path) && path != "" {
+        let previous = if @fs.exists(path) {
+          @fs.read_file(path).text()
+        } else {
+          ""
+        }
+        @fs.write_file(path, previous + outputs)
+      } else {
+        println(outputs.trim_end())
+      }
+    }
+  }
+}
+
+///|
+/// The `gh` arguments that create the release `tag` at `target` with the notes file `notes` and the
+/// files `assets`.
+fn create_args(
+  tag : String,
+  target : String,
+  notes : String,
+  assets : Array[String],
+) -> Array[String] {
+  [
+    "release", "create", tag, "--target", target, "--title", tag, "--notes-file",
+    notes, ..assets,
+  ]
+}
+
+///|
+async fn run_github(
+  version : ReleaseVersion,
+  notes : String,
+  assets : Array[String],
+) -> Unit {
+  let tag = version.tag()
+  let (viewed, _) = output_of("gh", ["release", "view", tag])
+  if viewed == 0 {
+    fail_with("\{tag} already has a GitHub release; owner action is required")
+    return
+  }
+  // The tag push that started the run made the tag at this commit. Any other run must not find the
+  // tag, so that the release never takes a tag that names another commit.
+  if @env.get_env_var("GITHUB_REF_TYPE") != Some("tag") ||
+    @env.get_env_var("GITHUB_REF_NAME") != Some(tag) {
+    require_absent_tag(tag)
+  }
+  let target = @env.get_env_var("GITHUB_SHA").unwrap_or("HEAD")
+  let (code, out) = output_of("gh", create_args(tag, target, notes, assets))
+  if code != 0 {
+    fail_with("gh release create failed: \{out}")
+  }
+  println("Created the GitHub release \{tag}")
+}
+
+///|
+fn parse_version_arg(input : String) -> ReleaseVersion {
+  ReleaseVersion::parse(input) catch {
+    InvalidInput(input~, rule~) => {
+      eprintln("❌ version \{input} breaks the rule: \{rule.describe()}")
+      @sys.exit(2)
+      panic()
+    }
+  }
+}
+
+///|
+async fn main {
+  match @env.args()[1:] {
+    ["plan"] => run_plan()
+    ["notes", version] => {
+      let version = parse_version_arg(version)
+      match changelog_section(@fs.read_file("CHANGELOG.md").text(), version) {
+        Some(section) => println(section)
+        None => fail_with("CHANGELOG.md has no section for \{version.text}")
+      }
+    }
+    ["github", version, notes, .. assets] =>
+      run_github(parse_version_arg(version), notes, assets.to_owned())
+    _ => {
+      eprintln(
+        "Usage: moonx scripts/toolchain.mbtx scripts/release.mbtx plan | notes X.Y.Z | github X.Y.Z NOTES [ASSET...]",
+      )
+      @sys.exit(2)
+    }
+  }
+}
+
+///|
+fn v(text : String) -> ReleaseVersion raise InputError {
+  ReleaseVersion::parse(text)
+}
+
+///|
+fn plan_case(
+  pull_request : Bool,
+  run_ref : RunRef,
+  on_main : Bool,
+  released : Bool,
+  has_section : Bool,
+  dry_run~ : Bool = false,
+) -> Result[Plan, String] raise InputError {
+  plan(
+    pull_request~,
+    run_ref~,
+    on_main~,
+    dry_run~,
+    version=v("0.2.0"),
+    released~,
+    has_section~,
+  )
+}
+
+///|
+test "a release version has three components of digits with no leading zero" {
+  assert_eq(v("0.1.0").tag(), "v0.1.0")
+  assert_eq(v("10.20.30").text, "10.20.30")
+  let rule = (input : String) => {
+    try v(input) catch {
+      InvalidInput(rule~, ..) => Some(rule)
+    } noraise {
+      _ => None
+    }
+  }
+  assert_eq(rule("0.1"), Some(VersionComponents))
+  assert_eq(rule("0.1.0.0"), Some(VersionComponents))
+  assert_eq(rule("0.1.x"), Some(VersionDigits))
+  assert_eq(rule("0..1"), Some(VersionDigits))
+  assert_eq(rule("0.01.0"), Some(VersionLeadingZero))
+}
+
+///|
+test "plan releases only from main with a matching tag and a changelog section" {
+  assert_eq(
+    plan_case(false, Tag("v0.2.0"), true, false, true),
+    Ok(Release(v("0.2.0"))),
+  )
+  assert_eq(
+    plan_case(true, Branch("x"), false, false, false),
+    Ok(DryRun(v("0.2.0"))),
+  )
+  assert_eq(
+    plan_case(false, Branch("x"), false, false, false, dry_run=true),
+    Ok(DryRun(v("0.2.0"))),
+  )
+  // Only the push of the version tag releases.
+  assert_true(plan_case(false, Branch("main"), true, false, true) is Err(_))
+  assert_true(plan_case(false, Branch("main"), true, false, true) is Err(_))
+  assert_true(plan_case(false, Tag("v0.1.0"), true, false, true) is Err(_))
+  // The tagged commit must be on main.
+  assert_true(plan_case(false, Tag("v0.2.0"), false, false, true) is Err(_))
+  assert_true(plan_case(false, Tag("v0.2.0"), true, true, true) is Ok(Skip(_)))
+  assert_true(plan_case(false, Tag("v0.2.0"), true, false, false) is Err(_))
+  assert_eq(
+    Release(v("0.2.0")).outputs(),
+    "release=true\ndry_run=false\nversion=0.2.0\ntag=v0.2.0\n",
+  )
+  assert_eq(Skip("done").outputs(), "release=false\ndry_run=false\n")
+}
+
+///|
+test "changelog sections end at the next version heading" {
+  let text = "# Changelog\n\n## 0.2.0 - 2026-10-22\n\nNew.\n\n### Added\n\n- x\n\n## 0.1.0 - 2026-10-19\n\nOld.\n"
+  assert_eq(
+    changelog_section(text, v("0.2.0")),
+    Some("New.\n\n### Added\n\n- x"),
+  )
+  assert_eq(changelog_section(text, v("0.1.0")), Some("Old."))
+  assert_eq(changelog_section(text, v("0.3.0")), None)
+  assert_eq(changelog_section("## 0.2.00\n\nx\n", v("0.2.0")), None)
+}
+
+///|
+test "the release is created at the target with the notes file" {
+  assert_eq(create_args("v0.3.0", "abc", "notes.md", []), [
+    "release", "create", "v0.3.0", "--target", "abc", "--title", "v0.3.0", "--notes-file",
+    "notes.md",
+  ])
+}

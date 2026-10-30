@@ -1,0 +1,29 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonrockz/extism-tests/moonbit_guest"
+
+import {
+  "moonrockz/extism/engine",
+}
+
+// Values
+pub let describe_request : String
+
+pub let exit_request : String
+
+// Errors
+
+// Types and methods
+pub(all) struct Exchange {
+  code : Int32
+  output : Bytes
+}
+
+pub struct Guest {
+  // private fields
+}
+pub fn Guest::exchange(Self, String) -> Exchange raise @engine.CallError
+pub fn Guest::load(Bytes) -> Self raise @engine.EngineError
+
+// Type aliases
+
+// Traits

@@ -1,0 +1,149 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/crypto",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Run the Python describe check (task 4.5): the Morphir Python extension 0.4.1 and 0.4.2 answer
+/// `morphir_extension_info` and a `describe` request with the pinned responses on native and js.
+///
+/// It fetches both modules by their pinned URLs into `_build/python/`, checks their SHA-256, and runs
+/// the tests of `tests/python` on each target with `EXTISM_PYTHON_DIR` set. With `--browser` it also
+/// builds the browser page into `_build/browser/`: open `index.html` in a browser and choose the two
+/// modules in `_build/python/`; the page shows `"same": true` for each release.
+///
+/// Usage: `mise run test:python [-- --browser]`, or `moonx scripts/toolchain.mbtx scripts/python.mbtx`.
+/// It exits with 0 when every check passes and 1 when one fails.
+
+///|
+let releases : Array[(String, String)] = [
+  ("0.4.1", "a04722e16115667fc7c332177805dcb049aef563afcee0e5f80c5fea302f5b4e"),
+  ("0.4.2", "10acafa0f0282c5240e9620a5f2bb21629cc7580b9add528e7b77c7e54db22b5"),
+]
+
+///|
+fn url(version : String) -> String {
+  "https://github.com/finos/morphir-python/releases/download/extension%2Fpython%2Fv\{version}/morphir-python-binding-\{version}.wasm"
+}
+
+///|
+test "the release URL names the tag and the module" {
+  assert_eq(
+    url("0.4.2"),
+    "https://github.com/finos/morphir-python/releases/download/extension%2Fpython%2Fv0.4.2/morphir-python-binding-0.4.2.wasm",
+  )
+}
+
+///|
+suberror CheckError {
+  CheckError(String)
+}
+
+///|
+async fn digest(path : String) -> String {
+  @crypto.bytes_to_hex_string(@crypto.sha256(@fs.read_file(path).binary()))
+}
+
+///|
+async fn ensure_dir(path : String) -> Unit {
+  let mut current = ""
+  for part in path.split("/") {
+    current = if current == "" { part.to_owned() } else { "\{current}/\{part}" }
+    if !@fs.exists(current) {
+      @fs.mkdir(current)
+    }
+  }
+}
+
+///|
+async fn fetch(dir : String) -> Unit {
+  ensure_dir(dir)
+  for release in releases {
+    let (version, sha) = release
+    let path = "\{dir}/morphir-python-binding-\{version}.wasm"
+    if !@fs.exists(path) || digest(path) != sha {
+      let code = @process.run(
+        "curl",
+        ["-fsSL", "-o", path, url(version)],
+        stdout=@stdio.stderr,
+        stderr=@stdio.stderr,
+      )
+      guard code == 0 else {
+        raise CheckError("curl could not fetch \{url(version)}")
+      }
+    }
+    guard digest(path) == sha else {
+      raise CheckError("\{path} does not have the pinned SHA-256 \{sha}")
+    }
+  }
+}
+
+///|
+async fn moon(args : Array[String], environment : Map[String, String]) -> Unit {
+  let code = @process.run(
+    "moon",
+    args,
+    extra_env=environment,
+    stdout=@stdio.stdout,
+    stderr=@stdio.stderr,
+  )
+  guard code == 0 else {
+    raise CheckError("moon \{args.join(" ")} failed with status \{code}")
+  }
+}
+
+///|
+async fn main {
+  let browser = @env.args()[1:].contains("--browser")
+  try {
+    fetch("_build/python")
+    let environment = { "EXTISM_PYTHON_DIR": @fs.realpath("_build/python") }
+    for target in ["native", "js"] {
+      moon(
+        ["test", "--target", target, "-p", "moonrockz/extism-tests/python"],
+        environment,
+      )
+      println(
+        "✅ Python 0.4.1 and 0.4.2 give the pinned responses on \{target}",
+      )
+    }
+    if browser {
+      moon(["build", "--target", "js", "--release", "tests/browser"], {})
+      let out = "_build/browser"
+      ensure_dir(out)
+      let (code, found, _) = @process.collect_output("find", [
+        "_build/js/release/build", "-name", "browser.js",
+      ])
+      guard code == 0 && found.text().trim() != "" else {
+        raise CheckError("the js build of tests/browser is missing")
+      }
+      let built = found.text().trim().split("\n").collect()[0].to_owned()
+      @fs.write_file("\{out}/extism-browser.js", @fs.read_file(built).binary())
+      for file in ["index.html", "check.js"] {
+        @fs.write_file(
+          "\{out}/\{file}",
+          @fs.read_file("tests/browser/\{file}").binary(),
+        )
+      }
+      println(
+        "✅ Open \{out}/index.html in a browser and choose the modules in _build/python/",
+      )
+    }
+  } catch {
+    CheckError(message) => {
+      eprintln("❌ \{message}")
+      @sys.exit(1)
+    }
+    error => {
+      eprintln("❌ \{error}")
+      @sys.exit(1)
+    }
+  }
+}

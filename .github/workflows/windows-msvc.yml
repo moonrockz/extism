@@ -1,0 +1,43 @@
+name: Windows MSVC
+
+# The native engine on Windows x64 with MSVC: a fresh consumer of moonrockz/extism compiles the
+# vendored WAMR and SIMDe source with cl.exe and links it, the engine tests run, and the EXT-2 engine
+# gate runs. It runs on request only, for example for a release candidate.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MISE_EXPERIMENTAL: 'true'
+  # The mise release that installs the pinned tools. The setup action reads it.
+  MISE_VERSION: v2026.10.20
+
+jobs:
+  windows-msvc:
+    name: Engine (Windows x64, MSVC)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Set up the MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+      - name: Install pinned tools
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and run a fresh consumer
+        timeout-minutes: 10
+        run: mise run check:consumer -- native
+      # One test at a time, each with a limit of 60 seconds and its name printed first.
+      - name: Test the engine
+        timeout-minutes: 10
+        run: mise run test:engine -- native 60
+      # The receipt is the JSON line in the log.
+      - name: Run the EXT-2 engine gate
+        timeout-minutes: 10
+        run: mise run qualify:engine -- --json

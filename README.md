@@ -4,9 +4,8 @@ An [Extism](https://extism.org) host for MoonBit. A MoonBit program on native, N
 loads an Extism plugin, calls its exports and gets the results, with limits on memory and time.
 
 > [!NOTE]
-> The repository is new. The packages are empty, and no version is published yet. The first OpenSpec
-> change, [`host-extism-plugins`](openspec/changes/host-extism-plugins/), gives the requirements and
-> the design.
+> No version is published yet. The OpenSpec change
+> [`host-extism-plugins`](openspec/changes/host-extism-plugins/) gives the requirements and the design.
 
 ## Packages
 
@@ -54,7 +53,7 @@ On Windows, run the official `powershell.ps1` installer with `MOON_HOME` set to
 
 | Task | Does |
 | --- | --- |
-| `mise run check` | Every check: lint, validate, OpenSpec, tests, task script tests, builds and the site |
+| `mise run check` | Every check: lint, validate, the vendored WAMR check, OpenSpec, tests, task script tests, builds and the site |
 | `mise run lint` | YAML and workflow lint, MoonBit format check, `moon check --deny-warn` and interface check |
 | `mise run validate` | Workspace members, versions and publication flags |
 | `mise run test [-- <target>...]` | Tests on `wasm`, `wasm-gc`, `js` and `native` |
@@ -64,6 +63,9 @@ On Windows, run the official `powershell.ps1` installer with `MOON_HOME` set to
 | `mise run openspec:validate` | Validates the schema and every change and spec in strict mode |
 | `mise run openspec:setup` | Regenerates the OpenSpec agent skills |
 | `mise run build:site`, `check:site`, `dev:site` | Builds, checks and serves the docs site |
+| `mise run release:package` | Packages `moonrockz/extism`, audits the archive and records its SHA-256 |
+| `mise run release:policy` | Checks that `pkgs/extism` is the only public module |
+| `mise run check:wamr` | Compares each vendored WAMR and SIMDe file with its SHA-256 in `pkgs/extism/engine/wamr/UPSTREAM.md` |
 
 ## Contributing
 

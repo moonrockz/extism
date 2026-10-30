@@ -1,4 +1,82 @@
-// The WASM engine layer (`moonrockz/extism/engine`). It is empty until the host-extism-plugins change
-// implements it. Native uses WAMR built from C source with Zig, and js uses `WebAssembly`; a
-// wasm or wasm-gc host has no engine to embed, so the package supports native and js only.
+// The WASM engine layer (`moonrockz/extism/engine`). Native uses the WAMR fast interpreter, built from
+// the vendored C source in wamr/ with the consumer's C compiler; js uses `WebAssembly`. A wasm or
+// wasm-gc host has no engine to embed, so the package supports native and js only.
 supported_targets = "+native+js"
+
+// The backends use different imports: native.mbt uses cmp and utf8, js.mbt does not.
+
+warnings = "-29"
+
+import {
+  "moonrockz/extism/internal/binary",
+  "moonrockz/extism/wasi",
+  "moonbitlang/core/cmp",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/encoding/utf8",
+}
+
+import {
+  "moonrockz/extism/internal/fixtures",
+  "moonrockz/extism/kernel",
+  "moonbitlang/core/env",
+} for "test"
+
+import {
+  "moonrockz/extism/internal/fixtures",
+} for "wbtest"
+
+options(
+  // The engine stub, then one translation unit per WAMR source (scripts/vendor-wamr.mbtx writes
+  // them and lists them in wamr/UPSTREAM.md). They need no include path and no define.
+  "native-stub": [
+    "wamr/extism_engine.c",
+    "wamr/unit/wamr_wasm_application.c",
+    "wamr/unit/wamr_wasm_blocking_op.c",
+    "wamr/unit/wamr_wasm_exec_env.c",
+    "wamr/unit/wamr_wasm_loader_common.c",
+    "wamr/unit/wamr_wasm_memory.c",
+    "wamr/unit/wamr_wasm_native.c",
+    "wamr/unit/wamr_wasm_runtime_common.c",
+    "wamr/unit/wamr_wasm_interp_fast.c",
+    "wamr/unit/wamr_wasm_loader.c",
+    "wamr/unit/wamr_wasm_runtime.c",
+    "wamr/unit/wamr_thread_manager.c",
+    "wamr/unit/wamr_mem_alloc.c",
+    "wamr/unit/wamr_ems_alloc.c",
+    "wamr/unit/wamr_ems_gc.c",
+    "wamr/unit/wamr_ems_hmu.c",
+    "wamr/unit/wamr_ems_kfc.c",
+    "wamr/unit/wamr_bh_assert.c",
+    "wamr/unit/wamr_bh_bitmap.c",
+    "wamr/unit/wamr_bh_common.c",
+    "wamr/unit/wamr_bh_hashmap.c",
+    "wamr/unit/wamr_bh_leb128.c",
+    "wamr/unit/wamr_bh_list.c",
+    "wamr/unit/wamr_bh_log.c",
+    "wamr/unit/wamr_bh_queue.c",
+    "wamr/unit/wamr_bh_vector.c",
+    "wamr/unit/wamr_runtime_timer.c",
+    "wamr/unit/wamr_posix_blocking_op.c",
+    "wamr/unit/wamr_posix_malloc.c",
+    "wamr/unit/wamr_posix_memmap.c",
+    "wamr/unit/wamr_posix_sleep.c",
+    "wamr/unit/wamr_posix_thread.c",
+    "wamr/unit/wamr_posix_time.c",
+    "wamr/unit/wamr_mremap.c",
+    "wamr/unit/wamr_platform_init_darwin.c",
+    "wamr/unit/wamr_platform_init_linux.c",
+    "wamr/unit/wamr_platform_init_windows.c",
+    "wamr/unit/wamr_win_malloc.c",
+    "wamr/unit/wamr_win_memmap.c",
+    "wamr/unit/wamr_win_thread.c",
+    "wamr/unit/wamr_win_time.c",
+    "wamr/unit/wamr_win_util.c",
+  ],
+  targets: {
+    "native.mbt": [ "native" ],
+    "native_test.mbt": [ "native" ],
+    "native_wbtest.mbt": [ "native" ],
+    "js.mbt": [ "js" ],
+    "js_test.mbt": [ "js" ],
+  },
+)

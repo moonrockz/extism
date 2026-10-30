@@ -1,2 +1,10 @@
-// The WASI preview 1 sandbox (`moonrockz/extism/wasi`). It is empty until the host-extism-plugins
-// change implements it. It works on guest memory through the engine package, so it supports all four targets.
+// The WASI preview 1 sandbox (`moonrockz/extism/wasi`). It works on guest memory through the
+// GuestMemory trait, which the engine implements, so it has no engine import and supports all four targets.
+import {
+  "moonbitlang/core/cmp",
+  "moonbitlang/core/debug",
+}
+
+import {
+  "moonbitlang/core/buffer",
+} for "test"

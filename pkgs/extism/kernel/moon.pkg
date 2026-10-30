@@ -1,2 +1,9 @@
-// The Extism kernel (`moonrockz/extism/kernel`): the Zig kernel module embedded as bytes. It is empty
-// until the host-extism-plugins change implements it. Bytes have no target, so it supports all four.
+// The Extism kernel (`moonrockz/extism/kernel`): the Zig kernel module embedded as bytes, and its ABI.
+// Bytes have no target, so it supports all four.
+import {
+  "moonbitlang/core/debug",
+}
+
+import {
+  "moonrockz/extism/internal/binary",
+} for "test"

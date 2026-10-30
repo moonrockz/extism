@@ -1,0 +1,70 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/crypto",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Run the MoonBit guest check: the portable Morphir MEP extension's `model.wasm`, which uses SIMD,
+/// loads on the engine and answers a `describe` request and an exit request on native and js.
+///
+/// The module has no published release yet. Build it with `mise run package:mep-extension` in a
+/// checkout of finos/morphir-moonbit (it writes `.dev/portable-mep/extension/model.wasm`), and give its
+/// path. The script prints the SHA-256 of the module, for the receipt.
+///
+/// Usage: `mise run test:moonbit-guest -- <model.wasm>`, or
+/// `moonx scripts/toolchain.mbtx scripts/moonbit-guest.mbtx <model.wasm>`. It exits with 0 when the
+/// check passes on both targets, 1 when it fails and 2 on a usage error.
+
+///|
+suberror CheckError {
+  CheckError(String)
+}
+
+///|
+async fn check(path : String) -> Unit {
+  guard @fs.exists(path) else { raise CheckError("\{path} does not exist") }
+  let module_ = @fs.realpath(path)
+  let sha = @crypto.bytes_to_hex_string(
+    @crypto.sha256(@fs.read_file(module_).binary()),
+  )
+  println("model.wasm SHA-256: \{sha}")
+  for target in ["native", "js"] {
+    let code = @process.run(
+      "moon",
+      ["test", "--target", target, "-p", "moonrockz/extism-tests/moonbit_guest"],
+      extra_env={ "EXTISM_MOONBIT_GUEST": module_ },
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    guard code == 0 else {
+      raise CheckError("the MoonBit guest check failed on \{target}")
+    }
+    println("✅ The MoonBit guest answers describe and exits on \{target}")
+  }
+}
+
+///|
+async fn main {
+  guard @env.args()[1:] is [path] else {
+    eprintln("Usage: moonbit-guest.mbtx <model.wasm>")
+    @sys.exit(2)
+    return
+  }
+  check(path) catch {
+    CheckError(message) => {
+      eprintln("❌ \{message}")
+      @sys.exit(1)
+    }
+    error => {
+      eprintln("❌ \{error}")
+      @sys.exit(1)
+    }
+  }
+}

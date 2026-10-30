@@ -1,0 +1,12 @@
+// The browser half of the Python describe check: index.html loads the js build of this program.
+supported_targets = "js"
+
+import {
+  "moonrockz/extism-tests/python",
+}
+
+pkgtype(kind: "executable")
+
+options(
+  link: { "js": { "format": "iife" } },
+)

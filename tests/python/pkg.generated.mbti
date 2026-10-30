@@ -1,0 +1,27 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonrockz/extism-tests/python"
+
+// Values
+pub let describe_request : String
+
+pub let releases : Array[Release]
+
+pub fn report(Release, Bytes) -> String
+
+pub fn responses(Bytes) -> (Bytes, Bytes) raise
+
+pub fn sha256(Bytes) -> String
+
+// Errors
+
+// Types and methods
+pub(all) struct Release {
+  version : String
+  module_sha256 : String
+  info_sha256 : String
+  describe_sha256 : String
+}
+
+// Type aliases
+
+// Traits

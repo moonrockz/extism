@@ -1,0 +1,148 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Run the engine tests one at a time on a target, each with a time limit, and print the name of each
+/// test before it starts, so that a log shows which test does not end.
+///
+/// Usage: `mise run test:engine [-- <target> [<seconds>]]` (default: native, 120 seconds), or
+/// `moonx scripts/toolchain.mbtx scripts/test-engine.mbtx`. It exits with 0 when every test passes, 1
+/// when a test fails or passes its time limit, and 2 on a usage error.
+
+///|
+let engine_dir : String = "pkgs/extism/engine"
+
+///|
+/// The test files of the engine package for a target.
+fn test_files(target : String) -> Array[String] {
+  match target {
+    "native" => ["engine_test.mbt", "native_test.mbt", "native_wbtest.mbt"]
+    "js" => ["engine_test.mbt", "js_test.mbt"]
+    _ => ["engine_test.mbt"]
+  }
+}
+
+///|
+/// The names of the tests in a test file, in order.
+fn test_names(source : String) -> Array[String] {
+  let names = []
+  for line in source.split("\n") {
+    let line = line.trim_start()
+    guard line is ['t', 'e', 's', 't', ' ', '"', .. rest] else { continue }
+    match rest.find("\"") {
+      Some(end) => names.push(rest[:end].to_owned())
+      None => ()
+    }
+  }
+  names
+}
+
+///|
+test "test_names reads the names in order" {
+  assert_eq(
+    test_names(
+      "///|\ntest \"one\" {\n}\n\n///|\ntest \"two words\" {\n  let x = \"test \\\"no\\\"\"\n}\n",
+    ),
+    ["one", "two words"],
+  )
+}
+
+///|
+suberror EngineTestError {
+  EngineTestError(String)
+}
+
+///|
+async fn run_one(
+  target : String,
+  file : String,
+  index : Int32,
+  name : String,
+  seconds : Int32,
+) -> Unit {
+  println("▶ \{file} #\{index}: \{name}")
+  let code = @async.with_timeout_opt(seconds * 1000, async fn() {
+    @process.run(
+      "moon",
+      [
+        "test",
+        "--target",
+        target,
+        "\{engine_dir}/\{file}",
+        "-i",
+        index.to_string(),
+      ],
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+      cancel_handler=@process.hard_cancel(),
+    )
+  })
+  match code {
+    None =>
+      raise EngineTestError(
+        "\{file} #\{index} (\{name}) did not end within \{seconds} seconds",
+      )
+    Some(0) => ()
+    Some(status) =>
+      raise EngineTestError(
+        "\{file} #\{index} (\{name}) failed with status \{status}",
+      )
+  }
+}
+
+///|
+async fn main {
+  let args = @env.args()[1:]
+  let (target, seconds) = match args {
+    [] => ("native", 120)
+    [target] => (target, 120)
+    [target, seconds] => (target, @string.parse_int(seconds) catch { _ => -1 })
+    _ => ("", -1)
+  }
+  guard target != "" && seconds > 0 else {
+    eprintln("Usage: test-engine.mbtx [<target> [<seconds>]]")
+    @sys.exit(2)
+    return
+  }
+  try {
+    // Build the tests first, outside the time limit of each test.
+    let built = @process.run(
+      "moon",
+      [
+        "test", "--target", target, "-p", "moonrockz/extism/engine", "--build-only",
+      ],
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    guard built == 0 else {
+      raise EngineTestError("the engine tests do not build on \{target}")
+    }
+    let mut count = 0
+    for file in test_files(target) {
+      let names = test_names(@fs.read_file("\{engine_dir}/\{file}").text())
+      for index, name in names {
+        run_one(target, file, index, name, seconds)
+        count += 1
+      }
+    }
+    println("✅ \{count} engine tests passed on \{target}, one at a time")
+  } catch {
+    EngineTestError(message) => {
+      eprintln("❌ \{message}")
+      @sys.exit(1)
+    }
+    error => {
+      eprintln("❌ \{error}")
+      @sys.exit(1)
+    }
+  }
+}
