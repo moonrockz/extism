@@ -137,6 +137,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run the engine gate
         run: mise run qualify:engine -- --json
+      - name: Test the engine with the switch dispatch (as MSVC builds it)
+        timeout-minutes: 10
+        run: mise run test:switch-dispatch
       - name: Build and run a fresh consumer
         run: mise run check:consumer
       - name: Check the Python describe responses on native and js

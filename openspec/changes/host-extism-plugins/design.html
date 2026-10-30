@@ -270,6 +270,19 @@ MoonBit closure or the exported function of another instance for each import) on
 <code>wasm_runtime_set_custom_data</code>. A trampoline finds the calling instance from its execution environment,
 reads that table with <code>wasm_runtime_get_custom_data</code> and calls the entry for its import. A test loads
 two plugins from one compiled module and checks that each reaches its own kernel.</p>
+<p><strong>Local patches.</strong> The vendored source is the upstream source, with its includes made relative,
+except for the patches in this list. <code>scripts/vendor-wamr.mbtx</code> applies each one when it vendors WAMR,
+fails when the upstream text does not match exactly once, and lists it in <code>wamr/UPSTREAM.md</code>.</p>
+<ul>
+<li><code>core/iwasm/interpreter/wasm_interp_fast.c</code>, function
+<code>wasm_interp_call_func_bytecode</code>, the <code>WASM_ENABLE_LABELS_AS_VALUES == 0</code> dispatch loop:
+the loop runs <code>CHECK_INSTRUCTION_LIMIT()</code> before each opcode. Reason: a compiler with no computed
+goto (MSVC) builds the switch dispatch, and upstream calls <code>CHECK_INSTRUCTION_LIMIT</code> only in the
+computed-goto <code>FETCH_OPCODE_AND_DISPATCH</code> macro, so the instruction budget is not enforced there.
+Without the patch, "Runaway loop on native" does not end on Windows MSVC (run 41120275074) and in a build with
+<code>WASM_ENABLE_LABELS_AS_VALUES=0</code>; CI runs the engine tests in that build on Linux. An issue draft for
+upstream is in the implementation pull request.</li>
+</ul>
 <p><code>pkgs/extism/engine/wamr/build.zig</code> holds the source list and the defines, the same as the CMake
 selection. It builds and tests WAMR alone with Zig for every CLI platform in CI. It also writes the
 <code>native-stub</code> list and the <code>stub-cc-flags</code> of the engine's <code>moon.pkg</code>; a check

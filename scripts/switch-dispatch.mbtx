@@ -1,0 +1,104 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Test the native engine in the build that a compiler with no computed goto makes (MSVC): WAMR's
+/// fast interpreter then uses its switch dispatch. It copies `pkgs/extism` into a temporary workspace,
+/// sets `WASM_ENABLE_LABELS_AS_VALUES` to 0 in the copy of `extism_config.h`, and runs the engine tests
+/// on native there, so that a change that breaks the switch dispatch (for example its instruction
+/// metering) fails on every pull request without a Windows runner.
+///
+/// Usage: `mise run test:switch-dispatch`, or `moonx scripts/toolchain.mbtx scripts/switch-dispatch.mbtx`.
+/// It exits with 0 when the tests pass and 1 when they fail.
+
+///|
+let setting : String = "#define WASM_ENABLE_FAST_INTERP 1\n"
+
+///|
+/// The build settings with the switch dispatch.
+fn switch_config(config : String) -> String? {
+  let parts = config.split(setting).collect()
+  guard parts.length() == 2 else { return None }
+  Some(
+    parts[0].to_owned() +
+    setting +
+    "/* scripts/switch-dispatch.mbtx: the dispatch of a compiler with no computed goto. */\n" +
+    "#define WASM_ENABLE_LABELS_AS_VALUES 0\n" +
+    parts[1].to_owned(),
+  )
+}
+
+///|
+test "switch_config adds the setting after the fast interpreter" {
+  assert_eq(
+    switch_config("a\n#define WASM_ENABLE_FAST_INTERP 1\nb\n"),
+    Some(
+      "a\n#define WASM_ENABLE_FAST_INTERP 1\n/* scripts/switch-dispatch.mbtx: the dispatch of a compiler with no computed goto. */\n#define WASM_ENABLE_LABELS_AS_VALUES 0\nb\n",
+    ),
+  )
+  assert_eq(switch_config("no setting"), None)
+}
+
+///|
+suberror SwitchError {
+  SwitchError(String)
+}
+
+///|
+async fn copy_tree(from : String, to : String) -> Unit {
+  @fs.mkdir(to)
+  for entry in @fs.readdir(from, sort=true) {
+    guard entry != "_build" && entry != ".mooncakes" else { continue }
+    let source = "\{from}/\{entry}"
+    match @fs.kind(source) {
+      Directory => copy_tree(source, "\{to}/\{entry}")
+      Regular =>
+        @fs.write_file("\{to}/\{entry}", @fs.read_file(source).binary())
+      _ => ()
+    }
+  }
+}
+
+///|
+async fn main {
+  try {
+    let dir = @fs.tmpdir(prefix="extism-switch")
+    defer @fs.rmdir(dir, recursive=true)
+    copy_tree("pkgs/extism", "\{dir}/extism")
+    let config_path = "\{dir}/extism/engine/wamr/extism_config.h"
+    guard switch_config(@fs.read_file(config_path).text()) is Some(config) else {
+      raise SwitchError("extism_config.h has no line \{setting.trim()}")
+    }
+    @fs.write_file(config_path, config)
+    @fs.write_file("\{dir}/moon.work", "members = [\n  \"./extism\",\n]\n")
+    let code = @process.run(
+      "moon",
+      ["test", "--target", "native", "-p", "moonrockz/extism/engine"],
+      cwd=dir,
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    guard code == 0 else {
+      raise SwitchError("the engine tests fail with the switch dispatch")
+    }
+    println(
+      "✅ The engine tests pass with the switch dispatch of the fast interpreter",
+    )
+  } catch {
+    SwitchError(message) => {
+      eprintln("❌ \{message}")
+      @sys.exit(1)
+    }
+    error => {
+      eprintln("❌ \{error}")
+      @sys.exit(1)
+    }
+  }
+}

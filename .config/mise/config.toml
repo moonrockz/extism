@@ -143,6 +143,10 @@ run = "moonx scripts/toolchain.mbtx scripts/python.mbtx"
 description = "Run the engine tests one at a time with a time limit each, printing each name first (args: target, seconds)"
 run = "moonx scripts/toolchain.mbtx scripts/test-engine.mbtx"
 
+[tasks."test:switch-dispatch"]
+description = "Run the native engine tests with the switch dispatch of WAMR, as a compiler with no computed goto (MSVC) builds it"
+run = "moonx scripts/toolchain.mbtx scripts/switch-dispatch.mbtx"
+
 [tasks.check]
 description = "Run lint, validate, OpenSpec validation, tests, task script tests, builds and the site check"
 run = "moonx scripts/toolchain.mbtx scripts/check.mbtx"

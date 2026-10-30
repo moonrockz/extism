@@ -82,7 +82,8 @@ than the initial pages of the module's memory SHALL fail the instantiation. The 
 ### Requirement: Instruction budget
 Where the engine meters instructions, a call SHALL stop with a budget error when it runs more instructions than
 its budget. The native engine SHALL meter instructions. The js engine does not meter. A budget SHALL be from 1 to
-2147483647 instructions, the range of the C `int` that WAMR takes.
+2147483647 instructions, the range of the C `int` that WAMR takes. The native engine SHALL enforce the budget with every C
+compiler that builds it, including MSVC.
 
 #### Scenario: Budget range
 - **WHEN** a caller makes a budget of 2147483647 and a budget of 2147483648
@@ -91,6 +92,11 @@ its budget. The native engine SHALL meter instructions. The js engine does not m
 #### Scenario: Runaway loop on native
 - **WHEN** a guest loops forever in a call with a budget of 1,000,000 instructions on native
 - **THEN** the call stops with a budget error and the instance is not usable for more calls
+
+#### Scenario: Budget with every C compiler
+- **WHEN** the native engine is built with a C compiler that has no computed goto, such as MSVC, and a guest loops
+  forever in a call with a budget of 1,000,000 instructions
+- **THEN** the call stops with a budget error, as with a compiler that has computed goto
 
 ### Requirement: Interruption
 Where the engine supports it, a call SHALL stop with an interruption error when its deadline passes. The native

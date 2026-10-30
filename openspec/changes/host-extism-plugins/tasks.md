@@ -43,7 +43,7 @@ land before group 1.
 - [x] 2.5 Implement the WAMR backend with raw host imports bound per instance, the forwarding kernel binding,
   maximum pages, the enlarge-memory callback, metering and the watchdog deadline (ENG-2, ENG-4, BND-1); verify the
   same scenarios on native, and "Runaway loop on native", "Deadline on native", "No watchdog left", "Native engine
-  report" and "SIMD module on an engine built without SIMD"
+  report", "Budget with every C compiler" and "SIMD module on an engine built without SIMD"
 - [x] 2.6 Add the differential kernel test in `tests/` with the upstream `extism-runtime.wasm` fixture, its
   license and SHA-256 (KRN-2); verify the "Differential call sequence", "Freed handle", "Kernel memory at its
   ceiling", "Load past the end", "Load at the memory size", "Store into the root record", "Input past its length"
