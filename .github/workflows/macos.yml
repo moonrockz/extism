@@ -1,0 +1,44 @@
+name: macOS
+
+# The kernel check and the engine tests on macOS arm64. It runs only when the kernel, the engine or
+# this workflow changes, and on request, so it is not a required check.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - kernel/**
+      - pkgs/extism/kernel/**
+      - pkgs/extism/engine/**
+      - .github/workflows/macos.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MISE_EXPERIMENTAL: 'true'
+  # The mise release that installs the pinned tools. The setup action reads it.
+  MISE_VERSION: v2026.10.20
+
+jobs:
+  macos:
+    name: Kernel and engine (macOS arm64)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install pinned tools
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test the kernel
+        run: mise run test:kernel
+      - name: Check the embedded kernel bytes
+        run: mise run check:kernel
+      - name: Test the engine
+        run: mise run test -- native

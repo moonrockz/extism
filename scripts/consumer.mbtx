@@ -1,0 +1,115 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Build and run a fresh consumer of `moonrockz/extism` outside the repository (task 2.1).
+///
+/// It writes a new module in a temporary directory, with a workspace that adds `pkgs/extism` by path,
+/// and a program that compiles a module that adds two `i64` values, links a guest to the kernel and
+/// calls both on the engine. It builds and runs the program on each target, so the native engine is
+/// compiled from the vendored C source with the C compiler that moon selects (MSVC on Windows).
+///
+/// Usage: `mise run check:consumer [-- <target>...]` (default: native js), or
+/// `moonx scripts/toolchain.mbtx scripts/consumer.mbtx [<target>...]`. It exits with 0 when every
+/// target builds and runs, else 1.
+
+///|
+let program : String =
+  #|///|
+  #|fn hex(text : String) -> Bytes {
+  #|  let value = (c : Char) => {
+  #|    let code = c.to_int()
+  #|    if code <= '9'.to_int() { code - '0'.to_int() } else { code - 'a'.to_int() + 10 }
+  #|  }
+  #|  let digits = text.iter().collect()
+  #|  Bytes::makei(digits.length() / 2, i => (value(digits[2 * i]) * 16 + value(digits[2 * i + 1])).to_byte())
+  #|}
+  #|
+  #|///|
+  #|fn main {
+  #|  let engine = @engine.Engine::default()
+  #|  let add = hex("0061736d0100000001070160027e7e017e030201000707010361646400000a09010700200020017c0b")
+  #|  let link = hex("0061736d0100000001060160017e017e0219010f65787469736d3a686f73742f656e7605616c6c6f630000030201000503010001071002066d656d6f727902000372756e00010a08010600200010000b")
+  #|  let result = try {
+  #|    let sum = engine.compile(add).instantiate(@engine.Imports::new()).call("add", [I64(2), I64(40)])
+  #|    let kernel = engine.compile(@kernel.bytes()).instantiate(@engine.Imports::new())
+  #|    guard kernel.export_function("alloc") is Some(alloc) else { abort("no alloc") }
+  #|    let imports = @engine.Imports::new().function("extism:host/env", "alloc", alloc)
+  #|    let handle = engine.compile(link).instantiate(imports).call("run", [I64(10)])
+  #|    (sum, handle)
+  #|  } catch {
+  #|    error => abort("consumer failed: \{error}")
+  #|  }
+  #|  guard result is ([I64(42)], [I64(77)]) else { abort("consumer got wrong results") }
+  #|  println("consumer ok")
+  #|}
+
+///|
+let all_targets : Array[String] = ["native", "js"]
+
+///|
+suberror ConsumerError {
+  ConsumerError(String)
+}
+
+///|
+async fn check(root : String, target : String) -> Unit {
+  let dir = @fs.tmpdir(prefix="extism-consumer")
+  defer @fs.rmdir(dir, recursive=true)
+  @fs.mkdir("\{dir}/consumer")
+  @fs.mkdir("\{dir}/consumer/main")
+  @fs.write_file(
+    "\{dir}/moon.work",
+    "members = [\n  \"./consumer\",\n  \"\{root}/pkgs/extism\",\n]\n",
+  )
+  @fs.write_file(
+    "\{dir}/consumer/moon.mod",
+    "name = \"consumer/app\"\n\nversion = \"0.1.0\"\n\nimport {\n  \"moonrockz/extism@0.1.0\",\n}\n",
+  )
+  @fs.write_file(
+    "\{dir}/consumer/main/moon.pkg",
+    "import {\n  \"moonrockz/extism/engine\",\n  \"moonrockz/extism/kernel\",\n}\n\npkgtype(kind: \"executable\")\n",
+  )
+  @fs.write_file("\{dir}/consumer/main/main.mbt", program)
+  let (code, out, err) = @process.collect_output(
+    "moon",
+    ["run", "--target", target, "--release", "consumer/main"],
+    cwd=dir,
+  )
+  @stdio.stderr.write(err.text())
+  guard code == 0 && out.text().contains("consumer ok") else {
+    raise ConsumerError(
+      "the consumer did not build and run on \{target}: \{out.text()}",
+    )
+  }
+  println("✅ A fresh consumer builds and runs on \{target}")
+}
+
+///|
+async fn main {
+  let args = @env.args()[1:]
+  let targets = if args.is_empty() { all_targets } else { args.to_array() }
+  try {
+    let root = @fs.realpath(".")
+    for target in targets {
+      check(root, target)
+    }
+  } catch {
+    ConsumerError(message) => {
+      eprintln("❌ \{message}")
+      @sys.exit(1)
+    }
+    error => {
+      eprintln("❌ \{error}")
+      @sys.exit(1)
+    }
+  }
+}

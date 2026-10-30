@@ -117,13 +117,36 @@ jobs:
       - name: Check the embedded kernel bytes
         run: mise run check:kernel
 
+  # The EXT-2 engine gate (GATE-1) on Linux x64 and arm64, and a fresh consumer of the package. The
+  # receipt is the JSON line in the log.
+  qualify:
+    name: Engine gate (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    needs: [lint]
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install pinned tools
+        uses: ./.github/actions/setup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run the engine gate
+        run: mise run qualify:engine -- --json
+      - name: Build and run a fresh consumer
+        run: mise run check:consumer
+
   # A single required check for branch protection.
   ci-ok:
     name: ci-ok
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [lint, test, test-scripts, site, kernel]
+    needs: [lint, test, test-scripts, site, kernel, qualify]
     steps:
       - name: Require every job to succeed
         env:

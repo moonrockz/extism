@@ -123,6 +123,18 @@ run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx check"
 description = "Run the Zig tests of the kernel"
 run = "moonx scripts/toolchain.mbtx scripts/kernel.mbtx test"
 
+[tasks."qualify:engine"]
+description = "Run the EXT-2 engine gate: the Python extension 0.4.2 compile on the native engine, with a receipt (args: --json)"
+run = "moonx scripts/toolchain.mbtx scripts/qualify.mbtx"
+
+[tasks."vendor:wamr"]
+description = "Vendor the WAMR source from a checkout at the pinned commit into pkgs/extism/engine/wamr (args: checkout)"
+run = "moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx"
+
+[tasks."check:consumer"]
+description = "Build and run a fresh consumer of moonrockz/extism outside the repository (args: targets; default: native js)"
+run = "moonx scripts/toolchain.mbtx scripts/consumer.mbtx"
+
 [tasks.check]
 description = "Run lint, validate, OpenSpec validation, tests, task script tests, builds and the site check"
 run = "moonx scripts/toolchain.mbtx scripts/check.mbtx"

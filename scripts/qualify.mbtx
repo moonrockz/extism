@@ -1,0 +1,152 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/crypto",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Run the EXT-2 engine qualification gate (design GATE-1) and print its receipt.
+///
+/// It fetches the Morphir Python extension `0.4.2` module by its pinned URL into `_build/qualify/`,
+/// checks its SHA-256, and runs `apps/qualify` on the native engine in release mode with the fixture
+/// in `apps/qualify/fixtures/extism-python`. The receipt has the platform, the WAMR commit, the kernel
+/// SHA-256, the module SHA-256, the budget, the instructions of one compile and the timings.
+///
+/// Usage: `mise run qualify:engine [-- --json]`, or `moonx scripts/toolchain.mbtx scripts/qualify.mbtx [--json]`.
+/// It exits with 0 when the gate passes and 1 when it fails.
+
+///|
+let plugin_url : String = "https://github.com/finos/morphir-python/releases/download/extension%2Fpython%2Fv0.4.2/morphir-python-binding-0.4.2.wasm"
+
+///|
+let plugin_sha256 : String = "10acafa0f0282c5240e9620a5f2bb21629cc7580b9add528e7b77c7e54db22b5"
+
+///|
+let work_dir : String = "_build/qualify"
+
+///|
+/// The commit in the `- Commit:` line of `wamr/UPSTREAM.md`.
+fn upstream_commit(text : String) -> String? {
+  for line in text.split("\n") {
+    let line = line.trim(chars=" \t\r")
+    if line.has_prefix("- Commit: `") {
+      return Some(line["- Commit: `".length():].trim(chars="`").to_owned())
+    }
+  }
+  None
+}
+
+///|
+test "upstream_commit reads the commit line" {
+  assert_eq(
+    upstream_commit("# x\n- Tag: `T`\n- Commit: `abc123`\n"),
+    Some("abc123"),
+  )
+  assert_eq(upstream_commit("no commit"), None)
+}
+
+///|
+suberror QualifyError {
+  QualifyError(String)
+}
+
+///|
+async fn digest(path : String) -> String {
+  @crypto.bytes_to_hex_string(@crypto.sha256(@fs.read_file(path).binary()))
+}
+
+///|
+async fn fetch() -> String {
+  let path = "\{work_dir}/morphir-python-binding-0.4.2.wasm"
+  if !@fs.exists(work_dir) {
+    @fs.mkdir("_build") catch {
+      _ => ()
+    }
+    @fs.mkdir(work_dir)
+  }
+  if !@fs.exists(path) || digest(path) != plugin_sha256 {
+    let code = @process.run(
+      "curl",
+      ["-fsSL", "-o", path, plugin_url],
+      stdout=@stdio.stderr,
+      stderr=@stdio.stderr,
+    )
+    guard code == 0 else {
+      raise QualifyError("curl could not fetch \{plugin_url}")
+    }
+  }
+  guard digest(path) == plugin_sha256 else {
+    raise QualifyError(
+      "\{path} does not have the pinned SHA-256 \{plugin_sha256}",
+    )
+  }
+  path
+}
+
+///|
+async fn platform() -> String {
+  let (code, out, _) = @process.collect_output("node", [
+    "-p", "process.platform + '-' + process.arch",
+  ])
+  if code == 0 {
+    out.text().trim().to_owned()
+  } else {
+    "unknown"
+  }
+}
+
+///|
+async fn main {
+  let json = @env.args()[1:].contains("--json")
+  try {
+    let plugin = fetch()
+    let commit = upstream_commit(
+      @fs.read_file("pkgs/extism/engine/wamr/UPSTREAM.md").text(),
+    ).unwrap_or("unknown")
+    let args = [
+      "run",
+      "--target",
+      "native",
+      "--release",
+      "apps/qualify/cmd",
+      "--",
+      "--plugin",
+      plugin,
+      "--fixture",
+      "apps/qualify/fixtures/extism-python",
+      "--platform",
+      platform(),
+      "--plugin-sha256",
+      plugin_sha256,
+      "--wamr-commit",
+      commit,
+    ]
+    if json {
+      args.push("--json")
+    }
+    let code = @process.run(
+      "moon",
+      args,
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    guard code == 0 else {
+      raise QualifyError("the gate failed with status \{code}")
+    }
+  } catch {
+    QualifyError(message) => {
+      eprintln("❌ \{message}")
+      @sys.exit(1)
+    }
+    error => {
+      eprintln("❌ \{error}")
+      @sys.exit(1)
+    }
+  }
+}

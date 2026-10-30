@@ -1,0 +1,461 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.6/crypto",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Vendor the WAMR fast-interpreter C source into `pkgs/extism/engine/wamr/`.
+///
+/// The engine builds WAMR with `native-stub`, and a consumer compiles it with its own C compiler from
+/// its own directory, so the build can use no `-I` path. This script copies the WAMR files that the
+/// engine build needs with their directory layout, and rewrites each quoted `#include` that WAMR finds
+/// through an include directory of its CMake build into a path relative to the including file. It
+/// writes one small translation unit per WAMR source under `wamr/unit/`, which includes
+/// `wamr/extism_config.h` first and selects the source for the platform, and `wamr/UPSTREAM.md` with
+/// the tag, the commit and the SHA-256 of each copied upstream file.
+///
+/// Usage: `mise run vendor:wamr -- <checkout>`, or
+/// `moonx scripts/toolchain.mbtx scripts/vendor-wamr.mbtx <checkout>`, where `<checkout>` is a git
+/// checkout of WAMR at the pinned commit. It exits with 0 on success, 1 on a failure and 2 on a usage
+/// error.
+
+///|
+let wamr_tag : String = "WAMR-2.4.5"
+
+///|
+let wamr_commit : String = "25bd7eb63e828e4bd242cc9b38d260b4b31c6605"
+
+///|
+let destination : String = "pkgs/extism/engine/wamr"
+
+///|
+/// The directories under `core/` whose headers are copied, with the sources of the build. An include that resolves outside them is in
+/// a part of WAMR that the engine build disables, and stays as it is.
+let copied_dirs : Array[String] = [
+  "iwasm/include", "iwasm/common", "iwasm/interpreter", "iwasm/libraries/thread-mgr",
+  "shared/utils", "shared/mem-alloc", "shared/mem-alloc/ems", "shared/platform/include",
+  "shared/platform/darwin", "shared/platform/linux", "shared/platform/windows", "shared/platform/common/posix",
+  "shared/platform/common/memory",
+]
+
+///|
+/// Single files under `core/` that are copied.
+let copied_files : Array[String] = ["config.h", "version.h"]
+
+///|
+/// The include directories of WAMR's CMake build for the fast interpreter, in search order, relative to
+/// `core/`. The platform directory comes from `extism_platform_internal.h` instead.
+let include_dirs : Array[String] = [
+  "iwasm/include", "iwasm/common", "iwasm/interpreter", "shared/utils", "shared/platform/include",
+  "shared/mem-alloc", "iwasm/libraries/thread-mgr", "shared/platform/windows",
+]
+
+///|
+/// When a WAMR source is compiled.
+enum Condition {
+  Always
+  Posix
+  Darwin
+  Linux
+  Windows
+} derive(Eq)
+
+///|
+fn Condition::guard_open(self : Condition) -> String {
+  match self {
+    Always => ""
+    Posix => "#if !defined(_WIN32)\n"
+    Darwin => "#if defined(__APPLE__)\n"
+    Linux => "#if defined(__linux__)\n"
+    Windows => "#if defined(_WIN32)\n"
+  }
+}
+
+///|
+/// The WAMR sources of the engine build, relative to `core/`, with the platform that compiles each.
+/// They follow the CMake selection for `INTERP=1`, `FAST_INTERP=1`, `THREAD_MGR=1`, `LIBC_WASI=0`,
+/// `LIBC_BUILTIN=0` and no AOT or JIT. No `invokeNative` source is used, because every host import is
+/// a raw native, and no Winsock source, because the engine opens no socket.
+let sources : Array[(String, Condition)] = [
+  ("iwasm/common/wasm_application.c", Always),
+  ("iwasm/common/wasm_blocking_op.c", Always),
+  ("iwasm/common/wasm_exec_env.c", Always),
+  ("iwasm/common/wasm_loader_common.c", Always),
+  ("iwasm/common/wasm_memory.c", Always),
+  ("iwasm/common/wasm_native.c", Always),
+  ("iwasm/common/wasm_runtime_common.c", Always),
+  ("iwasm/interpreter/wasm_interp_fast.c", Always),
+  ("iwasm/interpreter/wasm_loader.c", Always),
+  ("iwasm/interpreter/wasm_runtime.c", Always),
+  ("iwasm/libraries/thread-mgr/thread_manager.c", Always),
+  ("shared/mem-alloc/mem_alloc.c", Always),
+  ("shared/mem-alloc/ems/ems_alloc.c", Always),
+  ("shared/mem-alloc/ems/ems_gc.c", Always),
+  ("shared/mem-alloc/ems/ems_hmu.c", Always),
+  ("shared/mem-alloc/ems/ems_kfc.c", Always),
+  ("shared/utils/bh_assert.c", Always),
+  ("shared/utils/bh_bitmap.c", Always),
+  ("shared/utils/bh_common.c", Always),
+  ("shared/utils/bh_hashmap.c", Always),
+  ("shared/utils/bh_leb128.c", Always),
+  ("shared/utils/bh_list.c", Always),
+  ("shared/utils/bh_log.c", Always),
+  ("shared/utils/bh_queue.c", Always),
+  ("shared/utils/bh_vector.c", Always),
+  ("shared/utils/runtime_timer.c", Always),
+  ("shared/platform/common/posix/posix_blocking_op.c", Posix),
+  ("shared/platform/common/posix/posix_malloc.c", Posix),
+  ("shared/platform/common/posix/posix_memmap.c", Posix),
+  ("shared/platform/common/posix/posix_sleep.c", Posix),
+  ("shared/platform/common/posix/posix_thread.c", Posix),
+  ("shared/platform/common/posix/posix_time.c", Posix),
+  ("shared/platform/common/memory/mremap.c", Posix),
+  ("shared/platform/darwin/platform_init.c", Darwin),
+  ("shared/platform/linux/platform_init.c", Linux),
+  ("shared/platform/windows/platform_init.c", Windows),
+  ("shared/platform/windows/win_malloc.c", Windows),
+  ("shared/platform/windows/win_memmap.c", Windows),
+  ("shared/platform/windows/win_thread.c", Windows),
+  ("shared/platform/windows/win_time.c", Windows),
+  ("shared/platform/windows/win_util.c", Windows),
+]
+
+///|
+/// The normal form of a `/`-separated relative path: no `.` part, and `..` only at the start.
+fn normalize(path : String) -> String {
+  let parts : Array[String] = []
+  for part in path.split("/") {
+    let part = part.to_owned()
+    if part == "" || part == "." {
+      continue
+    } else if part == ".." &&
+      !parts.is_empty() &&
+      parts[parts.length() - 1] != ".." {
+      parts.pop() |> ignore
+    } else {
+      parts.push(part)
+    }
+  }
+  parts.join("/")
+}
+
+///|
+test "normalize removes dot parts and resolves parent parts" {
+  assert_eq(
+    normalize("iwasm/common/../interpreter/wasm.h"),
+    "iwasm/interpreter/wasm.h",
+  )
+  assert_eq(normalize("./a//b/./c"), "a/b/c")
+  assert_eq(normalize("../a"), "../a")
+}
+
+///|
+fn directory(path : String) -> String {
+  match path.rev_find("/") {
+    Some(at) => path[:at].to_owned()
+    None => ""
+  }
+}
+
+///|
+/// The path of `target` relative to the directory `from`, both relative to the same root.
+fn relative(from : String, target : String) -> String {
+  let from_parts = if from == "" {
+    []
+  } else {
+    from.split("/").map(p => p.to_owned()).collect()
+  }
+  let target_parts = target.split("/").map(p => p.to_owned()).collect()
+  let mut common = 0
+  while common < from_parts.length() &&
+        common < target_parts.length() - 1 &&
+        from_parts[common] == target_parts[common] {
+    common += 1
+  }
+  let up = Array::make(from_parts.length() - common, "..")
+  [..up, ..target_parts[common:]].join("/")
+}
+
+///|
+test "relative gives a path from a directory to a file" {
+  assert_eq(relative("shared/utils", "shared/utils/bh_log.h"), "bh_log.h")
+  assert_eq(
+    relative("iwasm/common", "shared/utils/bh_platform.h"),
+    "../../shared/utils/bh_platform.h",
+  )
+  assert_eq(relative("", "config.h"), "config.h")
+}
+
+///|
+/// The quoted name of an `#include "name"` line, or `None` for any other line.
+fn included_name(line : String) -> String? {
+  let text = line.trim_start(chars=" \t")
+  guard text is ['#', .. rest] else { return None }
+  let rest = rest.trim_start(chars=" \t")
+  guard rest.has_prefix("include") else { return None }
+  let rest = rest["include".length():].trim_start(chars=" \t")
+  guard rest is ['"', .. quoted] && quoted.find("\"") is Some(end) else {
+    return None
+  }
+  Some(quoted[:end].to_owned())
+}
+
+///|
+test "included_name reads quoted includes only" {
+  assert_eq(included_name("#include \"bh_log.h\""), Some("bh_log.h"))
+  assert_eq(included_name("  #  include \"../a.h\" // x"), Some("../a.h"))
+  assert_eq(included_name("#include <stdio.h>"), None)
+  assert_eq(included_name("int x;"), None)
+}
+
+///|
+/// Where the include `name` in the file `file` resolves, relative to `core/`: the directory of the file
+/// first, then the include directories. `platform_internal.h` resolves to the engine's platform
+/// dispatcher, which is at `../extism_platform_internal.h` from `core/`.
+fn resolve(file : String, name : String, exists : (String) -> Bool) -> String? {
+  if name == "platform_internal.h" {
+    return Some("../extism_platform_internal.h")
+  }
+  let beside = normalize(directory(file) + "/" + name)
+  if exists(beside) {
+    return Some(beside)
+  }
+  include_dirs.iter().map(dir => normalize(dir + "/" + name)).find_first(exists)
+}
+
+///|
+/// The source of the file `file` with each quoted include that resolves through an include directory
+/// rewritten to a path relative to the file.
+fn rewrite(file : String, source : String, exists : (String) -> Bool) -> String {
+  source
+  .split("\n")
+  .map(line => {
+    let line = line.to_owned()
+    guard included_name(line) is Some(name) else { return line }
+    guard resolve(file, name, exists) is Some(target) else { return line }
+    let path = relative(directory(file), target)
+    if path == name {
+      line
+    } else {
+      line.replace(old="\"\{name}\"", new="\"\{path}\"")
+    }
+  })
+  .collect()
+  .join("\n")
+}
+
+///|
+test "rewrite makes include-directory includes relative" {
+  let files = [
+    "iwasm/common/wasm_native.c", "iwasm/common/wasm_native.h", "shared/utils/bh_log.h",
+  ]
+  let exists = (path : String) => files.contains(path)
+  let source = "#include \"wasm_native.h\"\n#include \"bh_log.h\"\n#include \"platform_internal.h\"\n#include \"gone.h\"\n#include <stdio.h>"
+  assert_eq(
+    rewrite("iwasm/common/wasm_native.c", source, exists),
+    "#include \"wasm_native.h\"\n#include \"../../shared/utils/bh_log.h\"\n#include \"../../../extism_platform_internal.h\"\n#include \"gone.h\"\n#include <stdio.h>",
+  )
+}
+
+///|
+/// The file name of the translation unit of a source: `wamr_` and the source name, with the platform
+/// for the platform start-up files, which share a name.
+fn unit_name(source : String, condition : Condition) -> String {
+  let base = match source.rev_find("/") {
+    Some(at) => source[at + 1:].to_owned()
+    None => source
+  }
+  let stem = base[:base.length() - 2].to_owned()
+  let suffix = match condition {
+    Darwin => "_darwin"
+    Linux => "_linux"
+    Windows => if stem == "platform_init" { "_windows" } else { "" }
+    Always | Posix => ""
+  }
+  "wamr_\{stem}\{suffix}.c"
+}
+
+///|
+test "unit names are unique" {
+  let names = sources.map(entry => unit_name(entry.0, entry.1))
+  let unique : Map[String, Bool] = Map::from_array(
+    names.map(name => (name, true)),
+  )
+  assert_eq(unique.length(), names.length())
+  assert_eq(
+    unit_name("shared/platform/linux/platform_init.c", Linux),
+    "wamr_platform_init_linux.c",
+  )
+}
+
+///|
+fn unit_source(source : String, condition : Condition) -> String {
+  let guard_open = condition.guard_open()
+  let guard_close = if guard_open == "" { "" } else { "#endif\n" }
+  (
+    $|// Generated by scripts/vendor-wamr.mbtx. Do not edit.
+    $|// One translation unit of the WAMR engine build: the settings first, then the WAMR source.
+    $|#include "../extism_config.h"
+    $|
+  ) +
+  guard_open +
+  "#include \"../core/\{source}\"\n" +
+  guard_close
+}
+
+///|
+suberror VendorError {
+  VendorError(String)
+}
+
+///|
+async fn files_under(root : String, dir : String) -> Array[String] {
+  let found = []
+  for entry in @fs.readdir("\{root}/\{dir}", sort=true) {
+    let path = "\{dir}/\{entry}"
+    if @fs.kind("\{root}/\{path}") is Regular && entry.has_suffix(".h") {
+      found.push(path)
+    }
+  }
+  found
+}
+
+///|
+/// Make the directory `path` and each missing parent.
+async fn make_dirs(path : String) -> Unit {
+  let mut current = ""
+  for part in path.split("/") {
+    current = if current == "" { part.to_owned() } else { "\{current}/\{part}" }
+    if !@fs.exists(current) {
+      @fs.mkdir(current)
+    }
+  }
+}
+
+///|
+async fn vendor(checkout : String) -> Unit {
+  let (code, head, _) = @process.collect_output("git", [
+    "-C", checkout, "rev-parse", "HEAD",
+  ])
+  guard code == 0 && head.text().trim() == wamr_commit else {
+    raise VendorError(
+      "\{checkout} is not a WAMR checkout at \{wamr_tag} (\{wamr_commit})",
+    )
+  }
+  let core = "\{checkout}/core"
+  let files = [..copied_files, ..sources.map(entry => entry.0)]
+  for dir in copied_dirs {
+    files.append(files_under(core, dir))
+  }
+  // A copied file can include a header beside it in a directory that is not copied, for example
+  // `../aot/aot_runtime.h` from `iwasm/common/wasm_memory.c`. WAMR includes some of these whatever
+  // its settings, so each such header is copied too, until no new header is found.
+  let known : Map[String, Bool] = Map::from_array(
+    files.map(file => (file, true)),
+  )
+  let mut next = 0
+  while next < files.length() {
+    let file = files[next]
+    next += 1
+    for line in @fs.read_file("\{core}/\{file}").text().split("\n") {
+      guard included_name(line.to_owned()) is Some(name) &&
+        name.has_suffix(".h") else {
+        continue
+      }
+      let beside = normalize(directory(file) + "/" + name)
+      if !known.contains(beside) &&
+        !beside.has_prefix("..") &&
+        @fs.exists("\{core}/\{beside}") {
+        known[beside] = true
+        files.push(beside)
+      }
+    }
+  }
+  files.sort()
+  let exists = (path : String) => known.contains(path)
+  let target = "\{destination}/core"
+  if @fs.exists(target) {
+    @fs.rmdir(target, recursive=true)
+  }
+  let manifest = StringBuilder()
+  for file in files {
+    let data = @fs.read_file("\{core}/\{file}")
+    let bytes = data.binary()
+    let digest = @crypto.bytes_to_hex_string(@crypto.sha256(bytes))
+    manifest.write_string("| `core/\{file}` | `\{digest}` |\n")
+    let out = "\{target}/\{file}"
+    make_dirs(directory(out))
+    @fs.write_file(out, rewrite(file, data.text(), exists))
+  }
+  @fs.write_file(
+    "\{destination}/LICENSE",
+    @fs.read_file("\{checkout}/LICENSE").binary(),
+  )
+  let units = "\{destination}/unit"
+  if @fs.exists(units) {
+    @fs.rmdir(units, recursive=true)
+  }
+  make_dirs(units)
+  let stubs = []
+  for entry in sources {
+    let (source, condition) = entry
+    guard known.contains(source) else {
+      raise VendorError("WAMR source core/\{source} is missing")
+    }
+    let name = unit_name(source, condition)
+    @fs.write_file("\{units}/\{name}", unit_source(source, condition))
+    stubs.push("wamr/unit/\{name}")
+  }
+  @fs.write_file(
+    "\{destination}/UPSTREAM.md",
+    (
+      $|# Vendored WAMR
+      $|
+      $|The C source of the WebAssembly Micro Runtime (WAMR) that the native engine builds, from
+      $|https://github.com/bytecodealliance/wasm-micro-runtime. License: Apache-2.0 WITH LLVM-exception
+      $|(`LICENSE`).
+      $|
+      $|Do not edit the files under `core/` or `unit/`: `scripts/vendor-wamr.mbtx` writes them. It copies the
+      $|files with their layout and rewrites each quoted `#include` that WAMR resolves through an include
+      $|directory of its CMake build into a path relative to the including file, so that the engine
+      $|builds with no include path. `extism_config.h` holds the build settings.
+      $|
+    ) +
+    "- Tag: `\{wamr_tag}`\n- Commit: `\{wamr_commit}`\n\n## Translation units\n\n" +
+    stubs.map(stub => "- `\{stub}`").join("\n") +
+    "\n\n## Files and the SHA-256 of each upstream file\n\n| File | SHA-256 |\n| --- | --- |\n" +
+    manifest.to_string(),
+  )
+  println(
+    "✅ Vendored \{files.length()} WAMR files and \{stubs.length()} translation units into \{destination}",
+  )
+  println("native-stub list:")
+  for stub in stubs {
+    println("  \"\{stub}\",")
+  }
+}
+
+///|
+async fn main {
+  guard @env.args()[1:] is [checkout] else {
+    eprintln("Usage: vendor-wamr.mbtx <wamr-checkout>")
+    @sys.exit(2)
+    return
+  }
+  vendor(checkout) catch {
+    VendorError(message) => {
+      eprintln("❌ \{message}")
+      @sys.exit(1)
+    }
+    error => {
+      eprintln("❌ \{error}")
+      @sys.exit(1)
+    }
+  }
+}
