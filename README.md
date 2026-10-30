@@ -63,6 +63,8 @@ On Windows, run the official `powershell.ps1` installer with `MOON_HOME` set to
 | `mise run openspec:validate` | Validates the schema and every change and spec in strict mode |
 | `mise run openspec:setup` | Regenerates the OpenSpec agent skills |
 | `mise run build:site`, `check:site`, `dev:site` | Builds, checks and serves the docs site |
+| `mise run release:package` | Packages `moonrockz/extism`, audits the archive and records its SHA-256 |
+| `mise run release:policy` | Checks that `pkgs/extism` is the only public module |
 | `mise run check:wamr` | Compares each vendored WAMR and SIMDe file with its SHA-256 in `pkgs/extism/engine/wamr/UPSTREAM.md` |
 
 ## Contributing

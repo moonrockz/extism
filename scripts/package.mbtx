@@ -1,0 +1,399 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/x@0.5.6/crypto",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Package `moonrockz/extism` and gate its archive, ported from moonrockz/moon-lander.
+///
+/// - With no argument, it runs `moon package` in `pkgs/extism` (which runs `moon check` on the
+///   archive contents), audits the archive and writes its SHA-256 to `_build/publish/checksums.json`.
+///   The audit needs the license, the vendored WAMR and SIMDe sources with their license files and the
+///   kernel bytes, refuses tooling and test modules, and needs the archive `moon.mod` and `LICENSE` to
+///   equal the sources.
+/// - `--published` is the public archive checksum gate. It downloads the published version into an
+///   isolated moon home and fails unless its SHA-256 equals the one in `checksums.json`.
+///
+/// Usage: `mise run release:package`, `mise run check:published`, or
+/// `moonx scripts/toolchain.mbtx scripts/package.mbtx [--published]`. It exits with 0 on success, 1 on
+/// failure and 2 on a usage error.
+
+///|
+let module_folder : String = "pkgs/extism"
+
+///|
+let module_name : String = "moonrockz/extism"
+
+///|
+let checksum_file : String = "_build/publish/checksums.json"
+
+///|
+/// Entries that the archive must hold: the manifest, the licenses, the vendored engine sources and
+/// their provenance, and the embedded kernel.
+let required_entries : Array[String] = [
+  "moon.mod", "moon.pkg", "LICENSE", "README.md", "engine/wamr/LICENSE", "engine/wamr/ATTRIBUTIONS.md",
+  "engine/wamr/UPSTREAM.md", "engine/wamr/simde/COPYING", "engine/wamr/extism_engine.c",
+  "kernel/kernel_bytes.mbt",
+]
+
+///|
+/// Directories of which the archive must hold at least one file.
+let required_directories : Array[String] = [
+  "engine/wamr/core/", "engine/wamr/unit/", "engine/wamr/simde/",
+]
+
+///|
+/// Directories that belong to tooling, tests or build output, never to the published module.
+let foreign_directories : Array[String] = [
+  "_build/", ".mooncakes/", "node_modules/", "docs/", "tests/", "apps/", ".git/",
+  "target/",
+]
+
+///|
+/// The rule that a release input breaks.
+priv enum InputRule {
+  VersionComponents
+  VersionDigits
+  VersionLeadingZero
+  DigestLength
+  DigestCharacter
+} derive(Eq, Debug)
+
+///|
+
+///|
+fn InputRule::describe(self : InputRule) -> String {
+  match self {
+    VersionComponents => "a version has three components"
+    VersionDigits => "a version component is digits"
+    VersionLeadingZero => "a version component has no leading zero"
+    DigestLength => "a SHA-256 digest has 64 hex digits"
+    DigestCharacter => "a SHA-256 digest has lowercase hex digits"
+  }
+}
+
+///|
+priv suberror InputError {
+  InvalidInput(input~ : String, rule~ : InputRule)
+} derive(Debug)
+
+///|
+priv struct ReleaseVersion {
+  text : String
+}
+
+///|
+fn ReleaseVersion::parse(input : String) -> ReleaseVersion raise InputError {
+  let parts = input.split(".").collect()
+  guard parts.length() == 3 else {
+    raise InvalidInput(input~, rule=VersionComponents)
+  }
+  for part in parts {
+    guard !part.is_empty() && part.iter().all(c => c >= '0' && c <= '9') else {
+      raise InvalidInput(input~, rule=VersionDigits)
+    }
+    guard part.length() == 1 || !part.has_prefix("0") else {
+      raise InvalidInput(input~, rule=VersionLeadingZero)
+    }
+  }
+  { text: input, }
+}
+
+///|
+/// A SHA-256 digest in 64 lowercase hex digits.
+priv struct ArchiveDigest {
+  hex : String
+} derive(Eq, Debug)
+
+///|
+fn ArchiveDigest::parse(input : String) -> ArchiveDigest raise InputError {
+  guard input.length() == 64 else {
+    raise InvalidInput(input~, rule=DigestLength)
+  }
+  guard input.iter().all(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) else {
+    raise InvalidInput(input~, rule=DigestCharacter)
+  }
+  { hex: input, }
+}
+
+///|
+/// SHA-256 gives exactly 64 lowercase hex digits, so this cannot fail.
+fn ArchiveDigest::of_archive(bytes : Bytes) -> ArchiveDigest {
+  { hex: @crypto.bytes_to_hex_string(@crypto.sha256(bytes)), }
+}
+
+///|
+/// The problems of an archive with the entries `names`.
+fn archive_audit(names : Array[String]) -> Array[String] {
+  let problems = []
+  for required in required_entries {
+    if !names.contains(required) {
+      problems.push("missing " + required)
+    }
+  }
+  for directory in required_directories {
+    if !names.iter().any(name => name.has_prefix(directory)) {
+      problems.push("no file in " + directory)
+    }
+  }
+  for name in names {
+    if name.has_prefix("/") ||
+      name.contains("..") ||
+      foreign_directories
+      .iter()
+      .any(directory => {
+        name.has_prefix(directory) || name.contains("/" + directory)
+      }) {
+      problems.push("foreign entry " + name)
+    }
+  }
+  problems
+}
+
+///|
+fn module_version(manifest : String) -> String? {
+  for line in manifest.split("\n") {
+    if line.has_prefix("version = \"") {
+      let rest = line[11:]
+      if rest.find("\"") is Some(end) {
+        return Some(rest[:end].to_owned())
+      }
+    }
+  }
+  None
+}
+
+///|
+fn checksums_json(digest : ArchiveDigest) -> String {
+  let json = Json::object(Map([(module_name, Json::string(digest.hex))]))
+  json.stringify(indent=2) + "\n"
+}
+
+///|
+fn approved_digest(text : String) -> ArchiveDigest raise {
+  guard @json.parse(text) is Object(map) &&
+    map.get(module_name) is Some(String(hex)) else {
+    fail("\{checksum_file} has no checksum for \{module_name}")
+  }
+  ArchiveDigest::parse(hex)
+}
+
+///|
+fn fail_with(message : String) -> Unit {
+  eprintln("❌ \{message}")
+  @sys.exit(1)
+}
+
+///|
+async fn collect(
+  cmd : String,
+  args : Array[String],
+  cwd? : StringView,
+  extra_env~ : Map[String, String] = {},
+) -> String {
+  let (code, out, err) = @process.collect_output(cmd, args, cwd?, extra_env~) catch {
+    error => {
+      fail_with("cannot start \{cmd}: \{error}")
+      return ""
+    }
+  }
+  if code != 0 {
+    fail_with("\{cmd} \{args.join(" ")} failed\n\{out.text()}\{err.text()}")
+  }
+  out.text()
+}
+
+///|
+async fn read_version() -> ReleaseVersion {
+  let text = module_version(@fs.read_file("moon.mod").text()).unwrap_or("")
+  ReleaseVersion::parse(text) catch {
+    InvalidInput(input~, rule~) => {
+      fail_with(
+        "moon.mod version \"\{input}\" breaks the rule: \{rule.describe()}",
+      )
+      panic()
+    }
+  }
+}
+
+///|
+async fn package_archive(version : ReleaseVersion) -> Unit {
+  let archive = "_build/publish/\{module_name.replace_all(old="/", new="-")}-\{version.text}.zip"
+  if @fs.exists(archive) {
+    @fs.remove(archive)
+  }
+  collect("moon", ["-C", module_folder, "package"]) |> ignore
+  let names = collect("unzip", ["-Z1", archive])
+    .split("\n")
+    .filter(name => !name.is_empty())
+    .map(name => name.to_owned())
+    .collect()
+  let problems = archive_audit(names)
+  for file in ["moon.mod", "LICENSE"] {
+    let packed = collect("unzip", ["-p", archive, file])
+    let source = @fs.read_file("\{module_folder}/\{file}").text()
+    if packed != source {
+      problems.push("the archive \{file} differs from \{module_folder}/\{file}")
+    }
+  }
+  if @fs.read_file("\{module_folder}/LICENSE").text() !=
+    @fs.read_file("LICENSE").text() {
+    problems.push("\{module_folder}/LICENSE differs from LICENSE")
+  }
+  if !problems.is_empty() {
+    fail_with("\{archive}: \{problems.join("; ")}")
+  }
+  let digest = ArchiveDigest::of_archive(@fs.read_file(archive).binary())
+  @fs.write_file(checksum_file, checksums_json(digest))
+  println(
+    "Approved archive \{module_name}@\{version.text}: \{names.length()} entries, SHA-256 \{digest.hex}",
+  )
+}
+
+///|
+async fn verify_published(version : ReleaseVersion) -> Unit {
+  let approved = approved_digest(@fs.read_file(checksum_file).text()) catch {
+    error => {
+      fail_with("\{checksum_file}: \{error}")
+      panic()
+    }
+  }
+  let dir = @fs.tmpdir(prefix="extism-published")
+  defer @fs.rmdir(dir, recursive=true)
+  // An isolated moon home has no core library, so moon finds it through the pinned toolchain.
+  let toolchain = match @env.get_env_var("MOON_TOOLCHAIN_ROOT") {
+    Some(root) => root
+    None => @fs.realpath(collect("mise", ["where", "http:moonbit"]).trim())
+  }
+  let home = "\{dir}/moon"
+  let consumer = "\{dir}/consumer"
+  @fs.mkdir(home, recursive=true)
+  @fs.mkdir(consumer, recursive=true)
+  @fs.write_file(
+    "\{consumer}/moon.mod",
+    "name = \"published-consumer\"\nprivate = true\nversion = \"0.0.1\"\n",
+  )
+  let env = {
+    "MOON_HOME": home,
+    "MOON_TOOLCHAIN_ROOT": toolchain,
+    "MOON_DEP_CACHE": "\{dir}/dependencies",
+    "MOON_BUILD_CACHE": "\{dir}/build-cache",
+  }
+  collect("moon", ["update"], cwd=consumer, extra_env=env) |> ignore
+  collect(
+    "moon",
+    ["add", "\{module_name}@\{version.text}"],
+    cwd=consumer,
+    extra_env=env,
+  )
+  |> ignore
+  let cached = "\{home}/registry/cache/\{module_name}/\{version.text}.zip"
+  let digest = ArchiveDigest::of_archive(@fs.read_file(cached).binary())
+  if digest != approved {
+    fail_with(
+      "public archive mismatch for \{module_name}@\{version.text}: expected \{approved.hex}, got \{digest.hex}",
+    )
+  }
+  println(
+    "Public archive verified \{module_name}@\{version.text}: SHA-256 \{digest.hex}",
+  )
+}
+
+///|
+async fn main {
+  match @env.args()[1:] {
+    [] => package_archive(read_version())
+    ["--published"] => verify_published(read_version())
+    _ => {
+      eprintln("Usage: package.mbtx [--published]")
+      @sys.exit(2)
+    }
+  }
+}
+
+///|
+fn complete() -> Array[String] {
+  [
+    ..required_entries, "engine/wamr/core/iwasm/common/wasm_c_api.c", "engine/wamr/unit/wamr_bh_log.c",
+    "engine/wamr/simde/hedley.h", "engine/engine.mbt",
+  ]
+}
+
+///|
+test "the audit needs the licenses, the vendored sources and the kernel" {
+  assert_eq(archive_audit(complete()), [])
+  let without = (entry : String) => {
+    archive_audit(complete().filter(name => name != entry))
+  }
+  assert_eq(without("LICENSE"), ["missing LICENSE"])
+  assert_eq(without("engine/wamr/simde/COPYING"), [
+    "missing engine/wamr/simde/COPYING",
+  ])
+  assert_eq(without("kernel/kernel_bytes.mbt"), [
+    "missing kernel/kernel_bytes.mbt",
+  ])
+  assert_eq(without("engine/wamr/unit/wamr_bh_log.c"), [
+    "no file in engine/wamr/unit/",
+  ])
+}
+
+///|
+test "the audit refuses tooling, tests and paths outside the module" {
+  for
+    bad in [
+      "tests/moon.mod", "docs/plan.md", "../escape", "/abs", "x/.mooncakes/cache",
+      "apps/site/moon.mod", "engine/_build/x.o",
+    ] {
+    assert_eq(archive_audit([..complete(), bad]), ["foreign entry " + bad])
+  }
+}
+
+///|
+test "a digest has 64 lowercase hex digits" {
+  let rule = (input : String) => {
+    try ArchiveDigest::parse(input) catch {
+      InvalidInput(rule~, ..) => Some(rule)
+    } noraise {
+      _ => None
+    }
+  }
+  assert_eq(rule("a".repeat(64)), None)
+  assert_eq(rule("a".repeat(63)), Some(DigestLength))
+  assert_eq(rule("A".repeat(64)), Some(DigestCharacter))
+  assert_eq(ArchiveDigest::of_archive(b"").hex.length(), 64)
+}
+
+///|
+test "the checksum file round-trips the approved digest" {
+  let digest = ArchiveDigest::of_archive(b"archive")
+  assert_eq(approved_digest(checksums_json(digest)), digest)
+  assert_true(
+    try approved_digest("{}") catch {
+      _ => true
+    } noraise {
+      _ => false
+    },
+  )
+}
+
+///|
+test "a release version has three components of digits with no leading zero" {
+  assert_eq(ReleaseVersion::parse("0.1.0").text, "0.1.0")
+  let refused = (input : String) => {
+    try ReleaseVersion::parse(input) catch {
+      _ => true
+    } noraise {
+      _ => false
+    }
+  }
+  assert_true(refused("0.1"))
+  assert_true(refused("0.1.x"))
+  assert_true(refused("0.01.0"))
+}

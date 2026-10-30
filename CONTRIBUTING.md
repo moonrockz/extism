@@ -87,5 +87,18 @@ finos/morphir-moonbit. Do not close a bead before its pull request merges.
 
 ## Releases
 
-There is no release yet. A release needs the maintainer's approval. Never publish to Mooncakes from
-a workstation.
+A release needs the maintainer's approval. Never publish to Mooncakes from a workstation, and never
+move a tag.
+
+The Release workflow (`.github/workflows/release.yml`) publishes. To release version `X.Y.Z`:
+
+1. Set `version = "X.Y.Z"` in the root `moon.mod` and in every member (`mise run validate` checks
+   them), and add the section `## X.Y.Z` to `CHANGELOG.md`. Merge this to `main`.
+2. After the approval, the maintainer pushes the tag `vX.Y.Z` on that commit of `main`.
+
+The workflow then plans the run (the tag must name the `moon.mod` version and a commit of `main`),
+runs every CI job, packages and audits the module (`mise run release:package`), publishes it
+(`release:publish`), checks that the public archive has the approved SHA-256 (`check:published`)
+and creates the GitHub release. It never replaces a release or a tag. A pull request that changes a
+release file, or a manual run with `dry_run`, runs the plan and the package audit and does not
+publish.
