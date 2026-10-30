@@ -233,6 +233,8 @@ pub struct Instance {
   priv module_ : Module
   priv handle : InstanceHandle
   priv mut usable : Bool
+  /// A refused `memory.grow` that `take_refused_grow` has not given yet.
+  priv mut refused : Bool
   /// Instances whose exports this instance calls; they live as long as this one.
   priv linked : Array[Instance]
 }
@@ -264,7 +266,13 @@ pub fn Module::instantiate(
     ceiling,
     caller,
   )
-  let instance = { module_: self, handle, usable: true, linked, }
+  let instance = {
+    module_: self,
+    handle,
+    usable: true,
+    refused: false,
+    linked,
+  }
   caller.val = Some(instance)
   instance
 }
@@ -306,19 +314,31 @@ pub fn Instance::call(
     )
   }
   check_arguments(name, signature, args)
-  backend_take_refused_grow(self.handle) |> ignore
+  // A refusal before this call stays recorded for `take_refused_grow`; this call reads its own.
+  self.refused = self.refused || backend_take_refused_grow(self.handle)
   errdefer {
     self.usable = false
   }
-  backend_call(self.handle, name, signature, args, budget, deadline) catch {
-    Host(error) => raise Host(error)
+  let results = backend_call(
+    self.handle,
+    name,
+    signature,
+    args,
+    budget,
+    deadline,
+  ) catch {
+    Host(error) => {
+      self.refused = self.refused || backend_take_refused_grow(self.handle)
+      raise Host(error)
+    }
     error => {
-      if backend_take_refused_grow(self.handle) {
-        raise MemoryLimit
-      }
-      raise error
+      let refused = backend_take_refused_grow(self.handle)
+      self.refused = self.refused || refused
+      raise if refused { MemoryLimit } else { error }
     }
   }
+  self.refused = self.refused || backend_take_refused_grow(self.handle)
+  results
 }
 
 ///|
@@ -331,7 +351,9 @@ pub fn Instance::has_function(self : Instance, name : String) -> Bool {
 /// Whether a `memory.grow` of this instance was refused since the last call of this function. A
 /// caller that links instances, such as the plugin API with its kernel, reads it for each call.
 pub fn Instance::take_refused_grow(self : Instance) -> Bool {
-  backend_take_refused_grow(self.handle)
+  let refused = self.refused || backend_take_refused_grow(self.handle)
+  self.refused = false
+  refused
 }
 
 ///|

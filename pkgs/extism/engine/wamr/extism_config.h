@@ -66,8 +66,8 @@
 #define BH_MALLOC wasm_runtime_malloc
 #define BH_FREE wasm_runtime_free
 
-/* The engine links WAMR statically into the consumer, so its API has no DLL import or export. */
-#define WASM_RUNTIME_API_EXTERN
+/* As WAMR's CMake does: on MSVC, WAMR's own declarations then agree on their linkage. */
+#define COMPILING_WASM_RUNTIME_API 1
 
 /* The platform and the architecture. */
 #if defined(__APPLE__)
