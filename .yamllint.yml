@@ -1,0 +1,23 @@
+---
+extends: default
+
+ignore:
+  - _build/
+  - .mooncakes/
+  - node_modules/
+  - .git/
+  - .dev/  # gitignored scratch area
+  - _site/  # site build output
+  - openspec/schemas/  # copied from finos/morphir-moonbit; long instruction lines are upstream text
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+  indentation:
+    spaces: 2
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "title": "moonrockz/extism",
+  "description": "An Extism host for MoonBit",
+  "base_path": "/extism/",
+  "site_url": "https://moonrockz.github.io/extism/",
+  "repo_url": "https://github.com/moonrockz/extism",
+  "repo_ref": "main",
+  "packages": [],
+  "api": [],
+  "source_roots": ["docs", "site/pages"]
+}

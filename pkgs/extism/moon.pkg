@@ -1,0 +1,3 @@
+// The plugin API (`moonrockz/extism`). It is empty until the host-extism-plugins change implements it.
+// The engine has no wasm or wasm-gc backend, so the plugin API supports native and js only.
+supported_targets = "+native+js"

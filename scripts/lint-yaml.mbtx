@@ -1,0 +1,37 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/stdio",
+  "moonbitlang/x@0.5.6/sys",
+}
+----
+
+///|
+/// Lint every YAML file in the repository with yamllint, then the GitHub Actions workflows with
+/// actionlint.
+///
+/// Usage: `mise run lint:yaml`, or `moonx scripts/toolchain.mbtx scripts/lint-yaml.mbtx`. The yamllint
+/// ignore list is in `.yamllint.yml`.
+
+///|
+async fn main {
+  for
+    (title, command, args) in [
+      ("YAML files", "yamllint", ["--strict", "."]),
+      ("GitHub Actions workflows", "actionlint", []),
+    ] {
+    println("🔍 Linting \{title}...")
+    let code = @process.run(
+      command,
+      args,
+      stdout=@stdio.stdout,
+      stderr=@stdio.stderr,
+    )
+    if code != 0 {
+      println("❌ \{command} reported problems.")
+      @sys.exit(if code > 0 { code } else { 1 })
+    }
+  }
+  println("✅ YAML lint complete")
+}

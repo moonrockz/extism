@@ -1,0 +1,2 @@
+// The WASI preview 1 sandbox (`moonrockz/extism/wasi`). It is empty until the host-extism-plugins
+// change implements it. It works on guest memory through the engine package, so it supports all four targets.
