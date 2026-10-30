@@ -5,10 +5,6 @@ name: Windows MSVC
 # for example for a release candidate.
 on:
   workflow_dispatch:
-  # Temporary: one run on the implementation branch, because workflow_dispatch needs the workflow on
-  # the default branch. The next commit removes this trigger.
-  push:
-    branches: [DamianReeves/extism-host]
 
 permissions:
   contents: read
