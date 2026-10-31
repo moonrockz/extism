@@ -194,9 +194,23 @@ might lack, and that a Zig upgrade does not change the feature set. <code>mise r
 <code>pkgs/extism/kernel/kernel_bytes.mbt</code> with the bytes and their SHA-256; <code>mise run check:kernel</code>
 builds into <code>_build/</code> and fails when the bytes differ. CI runs the check on Linux and macOS so that a
 host-dependent build shows.</p>
-<p><em>Alternatives.</em> Embed upstream <code>extism-runtime.wasm</code>: it needs reference types for its
-externref global, and its source is Rust, which needs a Rust toolchain to rebuild. A kernel in MoonBit: every
-byte that a plugin reads would cross into host code on every engine. Both were rejected in EXT-3.</p>
+<p><strong>Settled.</strong> The Zig kernel is a settled maintainer decision (Damian Reeves, 2026-10-30), made
+again after the review of the implementation. A change to it needs a new OpenSpec change that the maintainer
+approves first. The reasons:</p>
+<ul>
+<li>The repository builds the kernel from its own source with the pinned Zig, and fixes it without a Rust
+toolchain or a new upstream release.</li>
+<li>The kernel returns 0 or changes nothing where upstream traps, so a plugin with a bad pointer fails that call
+and is not made unusable.</li>
+<li>The differential test of <a href="#krn-2">KRN-2</a> keeps the kernel equal to upstream. Its generated
+sequences found three differences, which are fixed and have Zig tests.</li>
+</ul>
+<p><em>Alternatives.</em> Embed upstream <code>extism-runtime.wasm</code>. Its source is Rust, which needs a Rust
+toolchain to rebuild, it traps where the Zig kernel gives 0, and it would put third-party bytes in the published
+package. When EXT-3 rejected it, it also needed reference types that an engine could lack; both engines now have
+reference types, and the differential test runs the file on both, but the other reasons stand. A kernel in
+MoonBit: every byte that a plugin reads would cross into host code on every engine. Both were rejected in EXT-3,
+and the rejection of upstream's file was confirmed on 2026-10-30.</p>
 
 <h3 id="krn-2">KRN-2. The kernel is tested against upstream, call for call (Call)</h3>
 <p>Zig tests check the allocator and the bounds checks. A differential test in <code>tests/</code> runs recorded
