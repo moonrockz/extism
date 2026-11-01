@@ -5,11 +5,11 @@ name = "moonrockz/extism-tests"
 
 private = true
 
-version = "0.1.0"
+version = "0.1.1"
 
 import {
   "moonbitlang/x@0.5.6",
-  "moonrockz/extism@0.1.0",
+  "moonrockz/extism@0.1.1",
 }
 
 description = "Tests of moonrockz/extism with upstream fixtures; excluded from publication"
