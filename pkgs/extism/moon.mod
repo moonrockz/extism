@@ -1,6 +1,6 @@
 name = "moonrockz/extism"
 
-version = "0.1.0"
+version = "0.1.1"
 
 description = "An Extism host for MoonBit: a WASM engine layer, the Extism kernel and a plugin API"
 

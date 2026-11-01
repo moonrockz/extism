@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.1.1
+
+A fix of the speed of the native engine on Windows with MSVC.
+
+### Fixed
+
+- `moonrockz/extism/engine`: on Windows with MSVC, the WAMR fast interpreter was slow. WAMR has
+  32-bit atomics only with GCC and Clang, so with MSVC the suspend flags were not atomic and the
+  interpreter locked and unlocked a Win32 mutex at each branch, loop and call. A vendored patch of
+  `bh_atomic.h` gives MSVC the 32-bit atomics with the Interlocked intrinsics, so the flags need no
+  lock. On windows-latest, the mean compile of the EXT-2 Python guest went from 306 ms to 18.5 ms.
+  Metering, deadlines and memory bounds do not change.
+
+### Repository
+
+- The OpenSpec change `host-extism-plugins` records the Zig kernel as a maintainer decision, and the
+  Windows engine measurements.
+
 ## 0.1.0
 
 The first release of `moonrockz/extism`, an Extism host for MoonBit on native and js.
