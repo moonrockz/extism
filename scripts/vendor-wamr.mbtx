@@ -336,6 +336,39 @@ let patches : Array[Patch] = [
     ],
   },
   {
+    file: "shared/utils/bh_atomic.h",
+    reason: "WAMR has 32-bit atomics only with the GCC and Clang builtins. With MSVC, the suspend " +
+    "flags are not atomic, and the fast interpreter locks and unlocks a Win32 mutex, two kernel " +
+    "calls, for each branch, loop and call (CHECK_SUSPEND_FLAGS); a compile with the Elm guest took " +
+    "11356 ms on Windows and 196 ms on macOS. The patch gives MSVC the 32-bit atomics with the " +
+    "Interlocked intrinsics, so that the flags need no lock, as with GCC and Clang. A plain load is " +
+    "sequentially consistent on x64, where the stores and read-modify-writes are locked " +
+    "instructions. Upstream has no MSVC atomics at WAMR-2.4.5 and at main " +
+    "f8ed1f442969c806ced7b127d4e4d397bf051737 (2026-10-28) alike.",
+    hunks: [
+      (
+        "#if BH_ATOMIC_32_IS_ATOMIC != 0\n\n#define BH_ATOMIC_32_LOAD(v) __atomic_load_n(&(v), __ATOMIC_SEQ_CST)\n",
+        "#if defined(_MSC_VER) && !defined(CLANG_GCC_HAS_ATOMIC_BUILTIN) \\\n    && !defined(WASM_UINT32_IS_ATOMIC)\n" +
+        "/* moonrockz/extism: 32-bit atomics with the Interlocked intrinsics of MSVC, so that the suspend\n" +
+        "   flags need no lock (UPSTREAM.md). */\n" +
+        "#include <intrin.h>\n" +
+        "#undef BH_ATOMIC_32_IS_ATOMIC\n" +
+        "#define BH_ATOMIC_32_IS_ATOMIC 1\n" +
+        "#if defined(_M_X64)\n" +
+        "#define BH_ATOMIC_32_LOAD(v) ((uint32)(*(volatile long *)&(v)))\n" +
+        "#else\n" +
+        "#define BH_ATOMIC_32_LOAD(v) ((uint32)_InterlockedOr((volatile long *)&(v), 0))\n" +
+        "#endif\n" +
+        "#define BH_ATOMIC_32_STORE(v, val) \\\n    (void)_InterlockedExchange((volatile long *)&(v), (long)(val))\n" +
+        "#define BH_ATOMIC_32_FETCH_OR(v, val) \\\n    ((uint32)_InterlockedOr((volatile long *)&(v), (long)(val)))\n" +
+        "#define BH_ATOMIC_32_FETCH_AND(v, val) \\\n    ((uint32)_InterlockedAnd((volatile long *)&(v), (long)(val)))\n" +
+        "#define BH_ATOMIC_32_FETCH_ADD(v, val) \\\n    ((uint32)_InterlockedExchangeAdd((volatile long *)&(v), (long)(val)))\n" +
+        "#define BH_ATOMIC_32_FETCH_SUB(v, val) \\\n    ((uint32)_InterlockedExchangeAdd((volatile long *)&(v), -(long)(val)))\n" +
+        "\n#elif BH_ATOMIC_32_IS_ATOMIC != 0\n\n#define BH_ATOMIC_32_LOAD(v) __atomic_load_n(&(v), __ATOMIC_SEQ_CST)\n",
+      ),
+    ],
+  },
+  {
     file: "iwasm/interpreter/wasm_runtime.c",
     reason: "The instantiation runs the guest's `__post_instantiate` and `__wasm_call_ctors` exports, " +
     "with no instruction budget and no deadline, and the Extism plugin runs its start-up exports " +
@@ -417,6 +450,32 @@ test "the start-up patch keeps no lookup of __post_instantiate or __wasm_call_ct
   let after = patch(file, before)
   assert_false(after.contains("lookup_post_instantiate_func"))
   assert_true(after.contains("call_ctors_func = NULL;"))
+}
+
+///|
+test "the atomics patch gives MSVC lock-free 32-bit atomics and keeps the GCC and Clang branch" {
+  let file = "shared/utils/bh_atomic.h"
+  let before = patches
+    .iter()
+    .filter(p => p.file == file)
+    .flat_map(p => p.hunks.iter().map(h => h.0))
+    .collect()
+    .join("\n")
+  let after = patch(file, before)
+  assert_true(
+    after.has_prefix(
+      "#if defined(_MSC_VER) && !defined(CLANG_GCC_HAS_ATOMIC_BUILTIN)",
+    ),
+  )
+  assert_true(after.contains("#define BH_ATOMIC_32_IS_ATOMIC 1\n"))
+  assert_true(
+    after.contains("_InterlockedOr((volatile long *)&(v), (long)(val))"),
+  )
+  assert_true(
+    after.contains(
+      "#elif BH_ATOMIC_32_IS_ATOMIC != 0\n\n#define BH_ATOMIC_32_LOAD(v) __atomic_load_n(",
+    ),
+  )
 }
 
 ///|

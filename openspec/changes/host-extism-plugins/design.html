@@ -337,6 +337,16 @@ and <code>__wasm_call_ctors</code>; it runs only the wasm start function. Reason
 start-up exports itself, as upstream Extism does (<a href="#plg-1">PLG-1</a>), and WAMR ran the constructors a
 second time, with no budget and no deadline. No WAMR setting or API skips these lookups. The test "Constructors
 run once" fails without the patch.</li>
+<li><code>core/shared/utils/bh_atomic.h</code>, the 32-bit atomics: with MSVC, the <code>BH_ATOMIC_32_*</code>
+operations use the <code>Interlocked</code> intrinsics, and <code>BH_ATOMIC_32_IS_ATOMIC</code> is 1, as with GCC
+and Clang. Reason: WAMR has 32-bit atomics only through the GCC and Clang builtins. Without them the suspend flags
+of the thread manager are not atomic, and the fast interpreter locks and unlocks <code>exec_env-&gt;wait_lock</code>,
+a Win32 mutex, in <code>CHECK_SUSPEND_FLAGS</code> at each branch, loop and call: two kernel calls each time. A
+compile with the Elm WASM guest of finos/morphir-elm took 11356 ms on Windows and 196 ms on macOS, over the 10000
+ms call deadline of finos/morphir-moonbit. With the patch, the interpreter reads the flags with a plain load,
+which is sequentially consistent on x64 because the writes are locked instructions, and the thread that stops a
+call still sets them under the lock. Upstream has no MSVC atomics at <code>WAMR-2.4.5</code> and at main
+<code>f8ed1f44</code>. The measurements are in task group 6.</li>
 </ul>
 <p><code>mise run check:wamr</code> compares each vendored file with the SHA-256 that <code>wamr/UPSTREAM.md</code>
 gives for it, after the include rewrite and the patches, and fails on a changed, missing or unlisted file. CI
