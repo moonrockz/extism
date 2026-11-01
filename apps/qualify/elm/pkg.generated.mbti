@@ -1,0 +1,14 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonrockz/extism-qualify/elm"
+
+// Values
+
+// Errors
+type ReplayError
+
+// Types and methods
+type Guest
+
+// Type aliases
+
+// Traits

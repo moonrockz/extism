@@ -1,0 +1,19 @@
+import {
+  "moonrockz/extism/engine",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/async/stdio",
+  "moonbitlang/core/env",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/string",
+  "moonbitlang/x/crypto",
+  "moonbitlang/x/sys",
+}
+
+// Temporary measurement of the native engine (bead morphir-ukvn.5.64.36.20); moonbitlang/async does
+// file I/O on native.
+
+supported_targets = "native"
+
+pkgtype(kind: "executable")
