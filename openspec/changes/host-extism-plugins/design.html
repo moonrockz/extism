@@ -346,7 +346,8 @@ compile with the Elm WASM guest of finos/morphir-elm took 11356 ms on Windows an
 ms call deadline of finos/morphir-moonbit. With the patch, the interpreter reads the flags with a plain load,
 which is sequentially consistent on x64 because the writes are locked instructions, and the thread that stops a
 call still sets them under the lock. Upstream has no MSVC atomics at <code>WAMR-2.4.5</code> and at main
-<code>f8ed1f44</code>. The measurements are in task group 6.</li>
+<code>f8ed1f44</code>. On windows-latest the patch takes the Elm compile from 10.5 s to 1.07 s and the EXT-2
+Python compile from 306 ms to 18.5 ms (task group 6).</li>
 </ul>
 <p><code>mise run check:wamr</code> compares each vendored file with the SHA-256 that <code>wamr/UPSTREAM.md</code>
 gives for it, after the include rewrite and the patches, and fails on a changed, missing or unlisted file. CI

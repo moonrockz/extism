@@ -41,13 +41,3 @@ jobs:
       - name: Run the EXT-2 engine gate
         timeout-minutes: 10
         run: mise run qualify:engine -- --json
-      # Temporary, for bead morphir-ukvn.5.64.36.20: five compiles with the Elm WASM guest of
-      # finos/morphir-elm extension/elm/v0.5.0-preview.2, downloaded into a new directory and checked
-      # against its SHA-256. The timings are the JSON line in the log.
-      - name: Time the Elm WASM guest
-        timeout-minutes: 15
-        run: >-
-          moon run --target native --release apps/qualify/elm --
-          "https://github.com/finos/morphir-elm/releases/download/extension%2Felm%2Fv0.5.0-preview.2/morphir-elm-0.5.0-preview.2.wasm"
-          4d3ea176fdc4c7b19d887c91834ba4cdfb785249e72ce23132a8d04734a8ca6c
-          "${{ runner.temp }}/elm-guest" apps/qualify/elm/requests 5
