@@ -94,6 +94,21 @@ land before group 1.
   repository pins `moonrockz/extism@0.1.0` and builds and runs a plugin call on native and js, and record the
   archive size and checksum on bead `morphir-ukvn.5.64.36.4`
 
+## 6. Engine speed on Windows MSVC (morphir-ukvn.5.64.36.20)
+
+- [x] 6.1 Measure the native engine on windows-latest with one manual run of `windows-msvc.yml`: the EXT-2 gate,
+  and five compiles with the Elm WASM guest of finos/morphir-elm `extension/elm/v0.5.0-preview.2` (SHA-256
+  `4d3ea176fdc4c7b19d887c91834ba4cdfb785249e72ce23132a8d04734a8ca6c`, `morphir-bytes-v1`), replayed from the
+  requests of the morphir-moonbit CLI by a temporary driver; verify the slow call is reproduced. Run 41265240371:
+  Python mean compile 306.05 ms, Elm compile 10505-10532 ms (macOS arm64: 184-199 ms)
+- [x] 6.2 Find the cause: with MSVC, WAMR has no 32-bit atomics, so `CHECK_SUSPEND_FLAGS` locks and unlocks a
+  Win32 mutex at each branch, loop and call. The optimization flags are not the cause: Moon gives `cl.exe` `/O2`
+  for the stubs in a release build. The switch dispatch of MSVC costs about 33% on macOS, and is kept
+- [x] 6.3 Add the `bh_atomic.h` patch (ENG-2, local patches) to `scripts/vendor-wamr.mbtx` with a test, vendor
+  again, and update `wamr/UPSTREAM.md`; verify `check:wamr`, the engine tests on every target and the switch
+  dispatch tests. Run 41265338382, windows-latest: the engine tests pass, Python mean compile 18.5 ms (Linux x64 CI
+  8.25 ms, run 41112968226), Elm compile 1043-1089 ms, under half of the 10000 ms call deadline
+
 ## Workflow follow-up
 
 - Archive the change in the pull request of the last group, following the archive guidance in

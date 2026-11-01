@@ -180,7 +180,30 @@ nonatomic_64_fetch_sub(bh_atomic_64_t *p, uint64 val)
 }
 #endif
 
-#if BH_ATOMIC_32_IS_ATOMIC != 0
+#if defined(_MSC_VER) && !defined(CLANG_GCC_HAS_ATOMIC_BUILTIN) \
+    && !defined(WASM_UINT32_IS_ATOMIC)
+/* moonrockz/extism: 32-bit atomics with the Interlocked intrinsics of MSVC, so that the suspend
+   flags need no lock (UPSTREAM.md). */
+#include <intrin.h>
+#undef BH_ATOMIC_32_IS_ATOMIC
+#define BH_ATOMIC_32_IS_ATOMIC 1
+#if defined(_M_X64)
+#define BH_ATOMIC_32_LOAD(v) ((uint32)(*(volatile long *)&(v)))
+#else
+#define BH_ATOMIC_32_LOAD(v) ((uint32)_InterlockedOr((volatile long *)&(v), 0))
+#endif
+#define BH_ATOMIC_32_STORE(v, val) \
+    (void)_InterlockedExchange((volatile long *)&(v), (long)(val))
+#define BH_ATOMIC_32_FETCH_OR(v, val) \
+    ((uint32)_InterlockedOr((volatile long *)&(v), (long)(val)))
+#define BH_ATOMIC_32_FETCH_AND(v, val) \
+    ((uint32)_InterlockedAnd((volatile long *)&(v), (long)(val)))
+#define BH_ATOMIC_32_FETCH_ADD(v, val) \
+    ((uint32)_InterlockedExchangeAdd((volatile long *)&(v), (long)(val)))
+#define BH_ATOMIC_32_FETCH_SUB(v, val) \
+    ((uint32)_InterlockedExchangeAdd((volatile long *)&(v), -(long)(val)))
+
+#elif BH_ATOMIC_32_IS_ATOMIC != 0
 
 #define BH_ATOMIC_32_LOAD(v) __atomic_load_n(&(v), __ATOMIC_SEQ_CST)
 #define BH_ATOMIC_32_STORE(v, val) __atomic_store_n(&(v), val, __ATOMIC_SEQ_CST)
