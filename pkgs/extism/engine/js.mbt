@@ -280,8 +280,7 @@ fn backend_instantiate(
   for binding in bindings {
     let (module_name, name, kind) = binding
     let value = match kind {
-      Host(signature, function) =>
-        host_function(signature, function, caller)
+      Host(signature, function) => host_function(signature, function, caller)
       Export(function) =>
         js_export(function.instance.handle.instance, function.name)
     }

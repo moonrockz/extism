@@ -79,7 +79,7 @@ pub fn Engine::compile(
   })() catch {
     DecodeError(at, rule) => raise Invalid("byte \{at}: \{rule}")
   }
-  { parsed, handle: backend_compile(prepared_bytes, prepared) }
+  { parsed, handle: backend_compile(prepared_bytes, prepared), }
 }
 
 ///|
@@ -287,16 +287,14 @@ pub fn Module::instantiate(
   }
   caller.val = Some(instance)
   if self.parsed.start is Some(_) {
-    (
-      instance.invoke(
-        @binary.start_export,
-        Signature::new([], []),
-        [],
-        budget,
-        deadline,
-      )
-      |> ignore
-    ) catch {
+    (instance.invoke(
+      @binary.start_export,
+      Signature::new([], []),
+      [],
+      budget,
+      deadline,
+    )
+    |> ignore) catch {
       error => raise Start(error)
     }
   }
@@ -423,7 +421,7 @@ pub fn Instance::export_function(self : Instance, name : String) -> Function? {
 /// The memory of the instance, or `None` when it has none.
 pub fn Instance::memory(self : Instance) -> Memory? {
   match self.module_.parsed.memory() {
-    Some(_) => Some({ handle: self.handle })
+    Some(_) => Some({ handle: self.handle, })
     None => None
   }
 }

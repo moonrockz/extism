@@ -1,6 +1,7 @@
 ///|
 /// A TCP port for the local preview server, from 1 to 65535.
-struct Port(Int) derive(Eq, Debug)
+#derive(Eq, Debug)
+struct Port(Int32)
 
 ///|
 /// The port that `serve` uses without `--port`.
@@ -17,17 +18,18 @@ fn Port::parse(text : String) -> Port raise UsageError {
 }
 
 ///|
-fn Port::value(self : Port) -> Int {
+fn Port::value(self : Port) -> Int32 {
   self.0
 }
 
 ///|
 /// A site command. `build` and `check` are finite; `serve` runs until it receives SIGINT or SIGTERM.
+#derive(Eq, Debug)
 enum Command {
   Build
   Check
   Serve(Port)
-} derive(Eq, Debug)
+}
 
 ///|
 /// The command name, as the user types it and as JSON reports give it.
@@ -41,11 +43,12 @@ fn Command::name(self : Command) -> String {
 
 ///|
 /// A parsed command line.
+#derive(Eq, Debug)
 struct Invocation {
   command : Command
   /// Write one JSON report to stdout, and human diagnostics to stderr.
   json : Bool
-} derive(Eq, Debug)
+}
 
 ///|
 /// A command line that the site driver does not accept. The payload is the argument at fault.
@@ -58,7 +61,7 @@ suberror UsageError {
 }
 
 ///|
-impl Show for UsageError with output(self, logger) {
+impl Show for UsageError with fn output(self, logger) {
   logger.write_string(
     match self {
       MissingCommand => "a command is missing"
@@ -85,7 +88,7 @@ fn Invocation::parse(args : ArrayView[String]) -> Invocation raise UsageError {
         guard option == "--json" else { raise UnknownOption(option) }
         json = true
       }
-      { command: if name == "build" { Build } else { Check }, json }
+      { command: if name == "build" { Build } else { Check }, json, }
     }
     "serve" => {
       let mut port = Port::default()
@@ -96,7 +99,7 @@ fn Invocation::parse(args : ArrayView[String]) -> Invocation raise UsageError {
         port = Port::parse(value)
         rest = after
       }
-      { command: Serve(port), json: false }
+      { command: Serve(port), json: false, }
     }
     _ => raise UnknownCommand(name)
   }

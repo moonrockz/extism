@@ -471,7 +471,6 @@ test "Denied HTTP request with a bad handle: still Denied, with no method and no
     b"",
   )
   assert_true(
-    error
-    is Denied({ function: "http_request", method_: None, url: None, }),
+    error is Denied({ function: "http_request", method_: None, url: None, }),
   )
 }

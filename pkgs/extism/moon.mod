@@ -14,4 +14,5 @@ keywords = [ "extism", "wasm", "webassembly", "plugin", "wamr" ]
 
 // The engine and the plugin API have no wasm or wasm-gc backend, so `moon info` writes their
 // interfaces from native.
+
 preferred_target = "native"

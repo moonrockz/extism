@@ -22,13 +22,14 @@ pub(all) enum VariablePolicy {
 
 ///|
 /// An Extism log level.
+#derive(Eq, Debug)
 pub(all) enum LogLevel {
   Trace
   Debug
   Info
   Warn
   Error
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend LogLevel with Eq::{equal, not_equal}

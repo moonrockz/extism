@@ -11,11 +11,14 @@ import {
 type UsageError
 
 // Types and methods
-type Command derive(Eq, @debug.Debug)
+#derive(Eq, @debug.Debug)
+type Command
 
-type Invocation derive(Eq, @debug.Debug)
+#derive(Eq, @debug.Debug)
+type Invocation
 
-type Port derive(Eq, @debug.Debug)
+#derive(Eq, @debug.Debug)
+type Port
 
 type Report
 

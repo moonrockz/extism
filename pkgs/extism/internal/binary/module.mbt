@@ -1,6 +1,7 @@
 ///|
 /// A WASM value type. `Other` holds the code of a type that the engines do not take, such as a typed
 /// reference of the GC proposal.
+#derive(Eq, Debug)
 pub(all) enum ValType {
   I32
   I64
@@ -10,7 +11,7 @@ pub(all) enum ValType {
   FuncRef
   ExternRef
   Other(Int32)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ValType with Eq::{equal, not_equal}
@@ -20,10 +21,11 @@ pub extend ValType with @debug.Debug::{to_repr}
 
 ///|
 /// A function type.
+#derive(Eq, Debug)
 pub(all) struct FuncType {
   params : Array[ValType]
   results : Array[ValType]
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend FuncType with Eq::{equal, not_equal}
@@ -33,12 +35,13 @@ pub extend FuncType with @debug.Debug::{to_repr}
 
 ///|
 /// The limits of a memory or a table, in pages or elements.
+#derive(Eq, Debug)
 pub(all) struct Limits {
   min : Int64
   max : Int64?
   shared : Bool
   is64 : Bool
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Limits with Eq::{equal, not_equal}
@@ -48,13 +51,14 @@ pub extend Limits with @debug.Debug::{to_repr}
 
 ///|
 /// The type of an import.
+#derive(Eq, Debug)
 pub(all) enum ImportType {
   Func(FuncType)
   Table
   Memory(Limits)
   Global
   Tag
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ImportType with Eq::{equal, not_equal}
@@ -63,11 +67,12 @@ pub extend ImportType with Eq::{equal, not_equal}
 pub extend ImportType with @debug.Debug::{to_repr}
 
 ///|
+#derive(Eq, Debug)
 pub(all) struct Import {
   module_ : String
   name : String
   type_ : ImportType
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Import with Eq::{equal, not_equal}
@@ -76,13 +81,14 @@ pub extend Import with Eq::{equal, not_equal}
 pub extend Import with @debug.Debug::{to_repr}
 
 ///|
+#derive(Eq, Debug)
 pub(all) enum ExportKind {
   Func
   Table
   Memory
   Global
   Tag
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ExportKind with Eq::{equal, not_equal}
@@ -91,11 +97,12 @@ pub extend ExportKind with Eq::{equal, not_equal}
 pub extend ExportKind with @debug.Debug::{to_repr}
 
 ///|
+#derive(Eq, Debug)
 pub(all) struct Export {
   name : String
   kind : ExportKind
   index : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Export with Eq::{equal, not_equal}
@@ -106,6 +113,7 @@ pub extend Export with @debug.Debug::{to_repr}
 ///|
 /// A WASM feature beyond the core set that the engines take (WASM 1.0 with sign extension,
 /// saturating conversions, multi-value, bulk memory and reference types).
+#derive(Eq, Debug)
 pub(all) enum Feature {
   Simd
   Threads
@@ -115,7 +123,7 @@ pub(all) enum Feature {
   TailCall
   MultiMemory
   Unknown(String)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Feature with Eq::{equal, not_equal}
@@ -125,11 +133,12 @@ pub extend Feature with @debug.Debug::{to_repr}
 
 ///|
 /// A section: its id and the range of its payload in the module bytes.
+#derive(Eq, Debug)
 pub(all) struct Section {
   id : Int32
   start : Int32
   end : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Section with Eq::{equal, not_equal}

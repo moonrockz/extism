@@ -73,13 +73,14 @@ let include_dirs : Array[String] = [
 
 ///|
 /// When a WAMR source is compiled.
+#derive(Eq)
 enum Condition {
   Always
   Posix
   Darwin
   Linux
   Windows
-} derive(Eq)
+}
 
 ///|
 fn Condition::guard_open(self : Condition) -> String {

@@ -328,7 +328,7 @@ test "the table has the preview 1 signatures" {
 
 ///|
 test "Sink bound: 1 byte to 16 MiB, 1 MiB by default" {
-  let refused = (bytes : Int) => {
+  let refused = (bytes : Int32) => {
     try @wasi.SinkBound::parse(bytes) catch {
       SinkBoundError(_, _) => true
     } noraise {
@@ -346,7 +346,9 @@ test "Sink bound: 1 byte to 16 MiB, 1 MiB by default" {
 ///|
 test "fd_write sends each iovec to the sink on its own, in order" {
   let calls : Array[Bytes] = []
-  let sandbox = @wasi.Sandbox::new().stdout(bytes => calls.push(bytes.to_owned()))
+  let sandbox = @wasi.Sandbox::new().stdout(bytes => {
+    calls.push(bytes.to_owned())
+  })
   let memory = plain()
   put(memory, 200, b"hello")
   put_u32(memory, 0, 200)
@@ -360,10 +362,15 @@ test "fd_write sends each iovec to the sink on its own, in order" {
 ///|
 test "fd_write with more than 1024 iovecs is EINVAL and sends nothing" {
   let calls = []
-  let sandbox = @wasi.Sandbox::new().stdout(bytes => calls.push(bytes.to_owned()))
+  let sandbox = @wasi.Sandbox::new().stdout(bytes => {
+    calls.push(bytes.to_owned())
+  })
   let memory = plain()
   assert_eq(call(sandbox, FdWrite, memory, [1, 0, 1025, 100]), Return(Inval))
-  assert_eq(call(sandbox, FdWrite, memory, [1, 0, 0xffffffff, 100]), Return(Inval))
+  assert_eq(
+    call(sandbox, FdWrite, memory, [1, 0, 0xffffffff, 100]),
+    Return(Inval),
+  )
   assert_eq(calls.length(), 0)
   assert_true(memory.bytes[100:104].iter().all(b => b == b'\xaa'))
 }
@@ -371,7 +378,9 @@ test "fd_write with more than 1024 iovecs is EINVAL and sends nothing" {
 ///|
 test "fd_write with a range outside memory is EFAULT and sends nothing, also after a valid iovec" {
   let calls = []
-  let sandbox = @wasi.Sandbox::new().stdout(bytes => calls.push(bytes.to_owned()))
+  let sandbox = @wasi.Sandbox::new().stdout(bytes => {
+    calls.push(bytes.to_owned())
+  })
   let memory = plain()
   put(memory, 200, b"hello")
   // A valid first iovec, then one that ends past the memory.

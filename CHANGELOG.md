@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+
+- The source uses the `#derive(...)` attribute of MoonBit 0.10.20 and builds without warnings on
+  0.10.20. MoonBit 0.10.18 is no longer supported.
+
+### Repository
+
+- The toolchain pin moves to MoonBit 0.10.20+65efd5b93. `mise run format` and `mise run lint:moonbit`
+  format and check every package again: with the 0.10.20 `moon`, `moon fmt .` selects only the
+  workspace root, which is not a package.
+
 ## 0.1.1
 
 A fix of the speed of the native engine on Windows with MSVC.

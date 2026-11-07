@@ -60,11 +60,11 @@ fn Kernel::run(self : Kernel, name : String, args : Array[Int64]) -> Int64? {
 ///|
 /// A deterministic random number source for the call sequences.
 struct Rng {
-  mut state : Int
+  mut state : Int32
 }
 
 ///|
-fn Rng::next(self : Rng, n : Int) -> Int {
+fn Rng::next(self : Rng, n : Int32) -> Int32 {
   self.state = (self.state * 1103515245 + 12345) & 0x7fffffff
   self.state % n
 }
@@ -81,7 +81,9 @@ fn Rng::value(self : Rng) -> Int64 {
     1 => -2L
     2 => 0x7fffffffffffffffL
     3 => 0x7fffffffffffffffL + 1L
-    4 => (self.next(0x7fffffff).to_int64() << 33) | self.next(0x7fffffff).to_int64()
+    4 =>
+      (self.next(0x7fffffff).to_int64() << 33) |
+      self.next(0x7fffffff).to_int64()
     _ => self.next(256).to_int64()
   }
 }
@@ -186,11 +188,11 @@ fn Kernel::replay(
 /// kernels start again with the calls before the trap, and the sequence goes on. Gives the number of
 /// calls and the number of upstream traps.
 fn differential_sequence(
-  seed : Int,
-  steps : Int,
+  seed : Int32,
+  steps : Int32,
   ceiling~ : Int32 = 64,
-) -> (Int, Int) raise {
-  let rng = { state: seed }
+) -> (Int32, Int32) raise {
+  let rng = { state: seed, }
   let mut ours = Kernel::start(@kernel.bytes(), ceiling)
   let mut theirs = Kernel::start(@upstream.upstream_kernel(), ceiling)
   let handles : Array[Int64] = []

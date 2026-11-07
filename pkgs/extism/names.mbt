@@ -1,8 +1,9 @@
 ///|
 /// A value that breaks the rule of its type: the name of the type, the value and the rule.
+#derive(Eq, Debug)
 pub(all) suberror NameError {
   NameError(String, String, String)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend NameError with Eq::{equal, not_equal}
@@ -27,9 +28,10 @@ fn check_name(kind : String, text : String) -> Unit raise NameError {
 
 ///|
 /// The import module name of a host function, for example `extism:host/user`.
+#derive(Eq, Debug)
 pub struct Namespace {
   priv text : String
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Namespace with Eq::{equal, not_equal}
@@ -51,9 +53,10 @@ pub fn Namespace::text(self : Namespace) -> String {
 
 ///|
 /// The import field name of a host function, for example `lookup`.
+#derive(Eq, Debug)
 pub struct FunctionName {
   priv text : String
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend FunctionName with Eq::{equal, not_equal}
@@ -75,9 +78,10 @@ pub fn FunctionName::text(self : FunctionName) -> String {
 
 ///|
 /// The name of a function that a plugin exports, for example `handle`.
+#derive(Eq, Debug)
 pub struct ExportName {
   priv text : String
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ExportName with Eq::{equal, not_equal}
@@ -99,9 +103,10 @@ pub fn ExportName::text(self : ExportName) -> String {
 
 ///|
 /// A handle: the offset of a block in kernel memory. Zero is no block, so a handle is more than 0.
+#derive(Eq, Debug)
 pub struct Handle {
   priv offset : Int64
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Handle with Eq::{equal, not_equal}
@@ -125,9 +130,10 @@ pub fn Handle::offset(self : Handle) -> Int64 {
 
 ///|
 /// A number of bytes, from 0 to 2147483647.
+#derive(Eq, Debug)
 pub struct ByteLimit {
   priv bytes : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ByteLimit with Eq::{equal, not_equal}
