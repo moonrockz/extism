@@ -12,6 +12,8 @@
 - The toolchain pin moves to MoonBit 0.10.20+65efd5b93. `mise run format` and `mise run lint:moonbit`
   format and check every package again: with the 0.10.20 `moon`, `moon fmt .` selects only the
   workspace root, which is not a package.
+- The docs site driver in `apps/site` moves to `moonrockz/telescope` 0.6.0, which requires MoonBit
+  0.10.20 and gives search and version picker islands that are built with 0.10.20.
 
 ## 0.1.1
 
