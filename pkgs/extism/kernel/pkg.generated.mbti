@@ -15,6 +15,7 @@ pub fn sha256() -> String
 // Errors
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub(all) enum KernelFunction {
   Alloc
   Free
@@ -36,7 +37,7 @@ pub(all) enum KernelFunction {
   ErrorSet
   ErrorGet
   MemoryBytes
-} derive(Eq, @debug.Debug)
+}
 pub fn KernelFunction::all() -> Array[Self]
 pub fn KernelFunction::equal(Self, Self) -> Bool
 pub fn KernelFunction::from_name(StringView) -> Self?
@@ -46,10 +47,11 @@ pub fn KernelFunction::params(Self) -> Array[KernelType]
 pub fn KernelFunction::results(Self) -> Array[KernelType]
 pub fn KernelFunction::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum KernelType {
   I32
   I64
-} derive(Eq, @debug.Debug)
+}
 pub fn KernelType::equal(Self, Self) -> Bool
 pub fn KernelType::not_equal(Self, Self) -> Bool
 pub fn KernelType::to_repr(Self) -> @debug.Repr

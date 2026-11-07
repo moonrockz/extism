@@ -31,12 +31,13 @@ pub fn HostFunction::label(self : HostFunction) -> String {
 
 ///|
 /// A manifest that the library refuses: the import that a registration names, and why.
+#derive(Eq, Debug)
 pub(all) suberror ManifestError {
   /// The name is a function that the library links in `extism:host/env`.
   ReservedName(String)
   /// The embedder registered the name before.
   AlreadyRegistered(String)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ManifestError with Eq::{equal, not_equal}
@@ -104,6 +105,7 @@ pub fn Manifest::register(
 ///|
 /// The Extism host functions that the library links in `extism:host/env`, with their upstream
 /// signatures.
+#derive(Eq, Debug)
 pub(all) enum ExtismFunction {
   ConfigGet
   VarGet
@@ -117,7 +119,7 @@ pub(all) enum ExtismFunction {
   HttpRequest
   HttpStatusCode
   HttpHeaders
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ExtismFunction with Eq::{equal, not_equal}
@@ -190,6 +192,7 @@ priv enum Link {
 
 ///|
 /// A plugin that the library refuses to load.
+#derive(Debug)
 pub(all) suberror LoadError {
   /// Nothing links this import: the module and the field.
   UnlinkedImport(String, String)
@@ -198,7 +201,7 @@ pub(all) suberror LoadError {
   WrongSignature(String, String)
   /// The engine refuses the module or its instantiation.
   Engine(@engine.EngineError)
-} derive(Debug)
+}
 
 ///|
 pub extend LoadError with @debug.Debug::{to_repr}

@@ -24,10 +24,11 @@ import {
 /// success, 1 for a failure and 2 for a usage error.
 
 ///|
+#derive(Eq, Debug)
 enum Operation {
   Validate
   Setup
-} derive(Eq, Debug)
+}
 
 ///|
 fn Operation::parse(args : ArrayView[String]) -> Operation? {

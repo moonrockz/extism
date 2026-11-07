@@ -23,11 +23,12 @@ import {
 
 ///|
 /// The rule that a release input breaks.
+#derive(Eq, Debug)
 priv enum InputRule {
   VersionComponents
   VersionDigits
   VersionLeadingZero
-} derive(Eq, Debug)
+}
 
 ///|
 
@@ -41,15 +42,17 @@ fn InputRule::describe(self : InputRule) -> String {
 }
 
 ///|
+#derive(Debug)
 priv suberror InputError {
   InvalidInput(input~ : String, rule~ : InputRule)
-} derive(Debug)
+}
 
 ///|
 /// A release version `X.Y.Z`, with no leading zero in a component.
+#derive(Eq, Debug)
 priv struct ReleaseVersion {
   text : String
-} derive(Eq, Debug)
+}
 
 ///|
 fn ReleaseVersion::parse(input : String) -> ReleaseVersion raise InputError {
@@ -97,11 +100,12 @@ fn RunRef::name(self : RunRef) -> String {
 }
 
 ///|
+#derive(Eq, Debug)
 priv enum Plan {
   Release(ReleaseVersion)
   DryRun(ReleaseVersion)
   Skip(String)
-} derive(Eq, Debug)
+}
 
 ///|
 /// A pull request run and a `dry_run` only check. Any other run releases only from the push of the

@@ -58,13 +58,14 @@ let foreign_directories : Array[String] = [
 
 ///|
 /// The rule that a release input breaks.
+#derive(Eq, Debug)
 priv enum InputRule {
   VersionComponents
   VersionDigits
   VersionLeadingZero
   DigestLength
   DigestCharacter
-} derive(Eq, Debug)
+}
 
 ///|
 
@@ -80,9 +81,10 @@ fn InputRule::describe(self : InputRule) -> String {
 }
 
 ///|
+#derive(Debug)
 priv suberror InputError {
   InvalidInput(input~ : String, rule~ : InputRule)
-} derive(Debug)
+}
 
 ///|
 priv struct ReleaseVersion {
@@ -108,9 +110,10 @@ fn ReleaseVersion::parse(input : String) -> ReleaseVersion raise InputError {
 
 ///|
 /// A SHA-256 digest in 64 lowercase hex digits.
+#derive(Eq, Debug)
 priv struct ArchiveDigest {
   hex : String
-} derive(Eq, Debug)
+}
 
 ///|
 fn ArchiveDigest::parse(input : String) -> ArchiveDigest raise InputError {

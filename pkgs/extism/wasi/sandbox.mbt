@@ -1,5 +1,6 @@
 ///|
 /// A WASI errno that the sandbox gives.
+#derive(Eq, Debug)
 pub(all) enum Errno {
   Success
   /// 8: the fd is not open; the sandbox has only fds 0, 1 and 2.
@@ -10,7 +11,7 @@ pub(all) enum Errno {
   Inval
   /// 76: the sandbox does not give the guest this capability.
   Notcapable
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Errno with Eq::{equal, not_equal}
@@ -32,12 +33,13 @@ pub fn Errno::code(self : Errno) -> Int32 {
 
 ///|
 /// A WASI clock.
+#derive(Eq, Debug)
 pub(all) enum ClockId {
   Realtime
   Monotonic
   ProcessCputime
   ThreadCputime
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ClockId with Eq::{equal, not_equal}
@@ -65,12 +67,13 @@ pub(all) struct Clock {
 
 ///|
 /// The result of a sandbox call.
+#derive(Eq, Debug)
 pub(all) enum Outcome {
   /// The function returns this errno to the guest.
   Return(Errno)
   /// `proc_exit` with this code: the call of the guest ends.
   Exit(Int32)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Outcome with Eq::{equal, not_equal}
@@ -80,9 +83,10 @@ pub extend Outcome with @debug.Debug::{to_repr}
 
 ///|
 /// A sink bound that breaks its rule: the bytes and the rule.
+#derive(Eq, Debug)
 pub(all) suberror SinkBoundError {
-  SinkBoundError(Int, String)
-} derive(Eq, Debug)
+  SinkBoundError(Int32, String)
+}
 
 ///|
 pub extend SinkBoundError with Eq::{equal, not_equal}
@@ -94,9 +98,10 @@ pub extend SinkBoundError with @debug.Debug::{to_repr}
 /// The most bytes that one `fd_write` gives a sink: 1 byte to 16 MiB. The bound applies to each call;
 /// a guest that writes in a loop makes many calls, so the embedder's sink bounds the total itself, for
 /// example with a tail of the last bytes.
+#derive(Eq, Debug)
 pub struct SinkBound {
-  priv bytes : Int
-} derive(Eq, Debug)
+  priv bytes : Int32
+}
 
 ///|
 pub extend SinkBound with Eq::{equal, not_equal}
@@ -106,11 +111,11 @@ pub extend SinkBound with @debug.Debug::{to_repr}
 
 ///|
 /// The largest sink bound: 16 MiB.
-let max_sink_bound : Int = 16 * 1024 * 1024
+let max_sink_bound : Int32 = 16 * 1024 * 1024
 
 ///|
 /// A sink bound of `bytes` bytes, from 1 to 16 MiB.
-pub fn SinkBound::parse(bytes : Int) -> SinkBound raise SinkBoundError {
+pub fn SinkBound::parse(bytes : Int32) -> SinkBound raise SinkBoundError {
   guard bytes >= 1 && bytes <= max_sink_bound else {
     raise SinkBoundError(
       bytes,
@@ -123,11 +128,11 @@ pub fn SinkBound::parse(bytes : Int) -> SinkBound raise SinkBoundError {
 ///|
 /// The default sink bound: 1 MiB.
 pub fn SinkBound::default() -> SinkBound {
-  { bytes: 1024 * 1024 }
+  { bytes: 1024 * 1024, }
 }
 
 ///|
-pub fn SinkBound::bytes(self : SinkBound) -> Int {
+pub fn SinkBound::bytes(self : SinkBound) -> Int32 {
   self.bytes
 }
 
@@ -177,7 +182,7 @@ pub fn Sandbox::stdout(
   sink : (BytesView) -> Unit,
   bound~ : SinkBound = SinkBound::default(),
 ) -> Sandbox {
-  { ..self, stdout: Some({ write: sink, bound }) }
+  { ..self, stdout: Some({ write: sink, bound, }), }
 }
 
 ///|
@@ -187,7 +192,7 @@ pub fn Sandbox::stderr(
   sink : (BytesView) -> Unit,
   bound~ : SinkBound = SinkBound::default(),
 ) -> Sandbox {
-  { ..self, stderr: Some({ write: sink, bound }) }
+  { ..self, stderr: Some({ write: sink, bound, }), }
 }
 
 ///|
@@ -287,9 +292,7 @@ fn[M : GuestMemory] Sandbox::answer(
       guard sink is Some(sink) else { return Notcapable }
       // Every range is checked before any byte goes to the sink.
       guard iovecs(memory, arg(1), arg(2)) is Some(pairs) else { return Inval }
-      guard inside(memory, arg(3), 4L) else {
-        raise OutOfBounds(arg(3), 4)
-      }
+      guard inside(memory, arg(3), 4L) else { raise OutOfBounds(arg(3), 4) }
       let bound = match sink {
         Some(sink) => sink.bound.bytes().to_int64()
         None => SinkBound::default().bytes().to_int64()

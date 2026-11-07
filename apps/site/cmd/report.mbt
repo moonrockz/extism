@@ -16,17 +16,17 @@ let config_path : String = "site/site.json"
 
 ///|
 fn Report::succeeded(command : Command, diagnostics~ : Json) -> Report {
-  { command, diagnostics, failed: false }
+  { command, diagnostics, failed: false, }
 }
 
 ///|
 fn Report::failed(command : Command, diagnostics~ : Json) -> Report {
-  { command, diagnostics, failed: true }
+  { command, diagnostics, failed: true, }
 }
 
 ///|
 /// 0 for success and 1 for a build or check failure. A usage error exits with 2 before a report exists.
-fn Report::exit_code(self : Report) -> Int {
+fn Report::exit_code(self : Report) -> Int32 {
   if self.failed {
     1
   } else {

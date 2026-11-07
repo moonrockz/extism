@@ -43,10 +43,7 @@ test "Instantiation under the deadline on native: a start function that loops fo
 test "Host function table on native: loading and dropping many plugins keeps it bounded" {
   for _ in 0..<200 {
     let plugin = @extism.Plugin::load(plugin_manifest())
-    assert_eq(
-      plugin.call(@extism.ExportName::parse("echo"), b"x"),
-      b"x",
-    )
+    assert_eq(plugin.call(@extism.ExportName::parse("echo"), b"x"), b"x")
   }
   // At most the entries of the plugins that are still alive (none) or not yet released.
   assert_true(@engine.host_entry_count() <= 64)

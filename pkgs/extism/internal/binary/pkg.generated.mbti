@@ -20,26 +20,29 @@ pub suberror DecodeError {
 }
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub(all) struct Export {
   name : String
   kind : ExportKind
   index : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn Export::equal(Self, Self) -> Bool
 pub fn Export::not_equal(Self, Self) -> Bool
 pub fn Export::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum ExportKind {
   Func
   Table
   Memory
   Global
   Tag
-} derive(Eq, @debug.Debug)
+}
 pub fn ExportKind::equal(Self, Self) -> Bool
 pub fn ExportKind::not_equal(Self, Self) -> Bool
 pub fn ExportKind::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum Feature {
   Simd
   Threads
@@ -49,45 +52,49 @@ pub(all) enum Feature {
   TailCall
   MultiMemory
   Unknown(String)
-} derive(Eq, @debug.Debug)
+}
 pub fn Feature::equal(Self, Self) -> Bool
 pub fn Feature::not_equal(Self, Self) -> Bool
 pub fn Feature::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) struct FuncType {
   params : Array[ValType]
   results : Array[ValType]
-} derive(Eq, @debug.Debug)
+}
 pub fn FuncType::equal(Self, Self) -> Bool
 pub fn FuncType::not_equal(Self, Self) -> Bool
 pub fn FuncType::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) struct Import {
   module_ : String
   name : String
   type_ : ImportType
-} derive(Eq, @debug.Debug)
+}
 pub fn Import::equal(Self, Self) -> Bool
 pub fn Import::not_equal(Self, Self) -> Bool
 pub fn Import::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum ImportType {
   Func(FuncType)
   Table
   Memory(Limits)
   Global
   Tag
-} derive(Eq, @debug.Debug)
+}
 pub fn ImportType::equal(Self, Self) -> Bool
 pub fn ImportType::not_equal(Self, Self) -> Bool
 pub fn ImportType::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) struct Limits {
   min : Int64
   max : Int64?
   shared : Bool
   is64 : Bool
-} derive(Eq, @debug.Debug)
+}
 pub fn Limits::equal(Self, Self) -> Bool
 pub fn Limits::not_equal(Self, Self) -> Bool
 pub fn Limits::to_repr(Self) -> @debug.Repr
@@ -117,15 +124,17 @@ pub fn Module::parse(Bytes) -> Self raise DecodeError
 pub fn Module::prepare(Self) -> Bytes raise DecodeError
 pub fn Module::uses_globals(Self) -> Bool raise DecodeError
 
+#derive(Eq, @debug.Debug)
 pub(all) struct Section {
   id : Int32
   start : Int32
   end : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn Section::equal(Self, Self) -> Bool
 pub fn Section::not_equal(Self, Self) -> Bool
 pub fn Section::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum ValType {
   I32
   I64
@@ -135,7 +144,7 @@ pub(all) enum ValType {
   FuncRef
   ExternRef
   Other(Int32)
-} derive(Eq, @debug.Debug)
+}
 pub fn ValType::equal(Self, Self) -> Bool
 pub fn ValType::not_equal(Self, Self) -> Bool
 pub fn ValType::to_repr(Self) -> @debug.Repr

@@ -1,11 +1,12 @@
 ///|
 /// A WASM number type of a host import or an export.
+#derive(Eq, Debug)
 pub(all) enum ValueType {
   I32
   I64
   F32
   F64
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ValueType with Eq::{equal, not_equal}
@@ -15,12 +16,13 @@ pub extend ValueType with @debug.Debug::{to_repr}
 
 ///|
 /// A WASM number value.
+#derive(Eq, Debug)
 pub(all) enum Value {
   I32(Int32)
   I64(Int64)
   F32(Float)
   F64(Double)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Value with Eq::{equal, not_equal}
@@ -41,10 +43,11 @@ pub fn Value::value_type(self : Value) -> ValueType {
 
 ///|
 /// The parameter and result types of a function.
+#derive(Eq, Debug)
 pub(all) struct Signature {
   params : Array[ValueType]
   results : Array[ValueType]
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Signature with Eq::{equal, not_equal}
@@ -92,9 +95,10 @@ pub suberror LimitError {
 
 ///|
 /// A number of 64 KiB pages of linear memory, from 1 to 65536.
+#derive(Eq, Debug)
 pub struct PageCount {
   priv pages : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend PageCount with Eq::{equal, not_equal}
@@ -123,9 +127,10 @@ pub fn PageCount::pages(self : PageCount) -> Int32 {
 
 ///|
 /// An instruction budget for one call, from 1 to 2147483647 instructions (the C `int` of WAMR).
+#derive(Eq, Debug)
 pub struct Budget {
   priv instructions : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Budget with Eq::{equal, not_equal}
@@ -150,9 +155,10 @@ pub fn Budget::instructions(self : Budget) -> Int32 {
 
 ///|
 /// A deadline for one call, in milliseconds, from 1 to 2147483647.
+#derive(Eq, Debug)
 pub struct Deadline {
   priv milliseconds : Int32
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Deadline with Eq::{equal, not_equal}
@@ -180,6 +186,7 @@ pub fn Deadline::milliseconds(self : Deadline) -> Int32 {
 ///|
 /// A WASM feature beyond the core set that both engines take: WASM 1.0 with mutable globals, sign
 /// extension, saturating conversions, multi-value, bulk memory and reference types.
+#derive(Eq, Debug)
 pub(all) enum Feature {
   Simd
   Threads
@@ -189,7 +196,7 @@ pub(all) enum Feature {
   TailCall
   MultiMemory
   Unknown(String)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Feature with Eq::{equal, not_equal}
@@ -238,10 +245,11 @@ pub fn Feature::scan(bytes : Bytes) -> Array[Feature] raise EngineError {
 
 ///|
 /// Whether an engine enforces a bound.
+#derive(Eq, Debug)
 pub(all) enum Bound {
   Enforced
   NotEnforced
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Bound with Eq::{equal, not_equal}
@@ -251,11 +259,12 @@ pub extend Bound with @debug.Debug::{to_repr}
 
 ///|
 /// The bounds that an engine enforces.
+#derive(Eq, Debug)
 pub(all) struct Bounds {
   memory : Bound
   budget : Bound
   interruption : Bound
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Bounds with Eq::{equal, not_equal}
@@ -265,6 +274,7 @@ pub extend Bounds with @debug.Debug::{to_repr}
 
 ///|
 /// The kind of a trap.
+#derive(Eq, Debug)
 pub(all) enum TrapKind {
   Unreachable
   MemoryOutOfBounds
@@ -276,7 +286,7 @@ pub(all) enum TrapKind {
   TableOutOfBounds
   Host
   Other
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend TrapKind with Eq::{equal, not_equal}
@@ -286,6 +296,7 @@ pub extend TrapKind with @debug.Debug::{to_repr}
 
 ///|
 /// An error of a module load or an instantiation.
+#derive(Debug)
 pub suberror EngineError {
   /// The bytes are not a valid module, with the reason.
   Invalid(String)
@@ -298,19 +309,20 @@ pub suberror EngineError {
   /// The start function of the module failed: a trap, an exhausted budget, an interruption, a memory
   /// limit or a host error.
   Start(CallError)
-} derive(Debug)
+}
 
 ///|
 pub extend EngineError with @debug.Debug::{to_repr}
 
 ///|
 /// The error of a host function, with its message.
+#derive(Eq, Debug)
 pub(all) suberror HostError {
   HostError(String)
   /// The host function ends the guest's call with an exit code, as WASI `proc_exit` does. After code 0
   /// the instance takes more calls, as upstream Extism; after another code it takes no more.
-  Exit(Int)
-} derive(Eq, Debug)
+  Exit(Int32)
+}
 
 ///|
 pub extend HostError with Eq::{equal, not_equal}
@@ -320,6 +332,7 @@ pub extend HostError with @debug.Debug::{to_repr}
 
 ///|
 /// An error of a call.
+#derive(Debug)
 pub(all) suberror CallError {
   /// The guest trapped.
   Trap(TrapKind)
@@ -337,16 +350,17 @@ pub(all) suberror CallError {
   ArgumentMismatch(String, String)
   /// An earlier call trapped, so the instance takes no more calls.
   Unusable
-} derive(Debug)
+}
 
 ///|
 pub extend CallError with @debug.Debug::{to_repr}
 
 ///|
 /// A guest memory access that is outside the memory: the offset and the length.
+#derive(Eq, Debug)
 pub(all) suberror MemoryError {
   OutOfBounds(Int64, Int32)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend MemoryError with Eq::{equal, not_equal}
@@ -356,6 +370,7 @@ pub extend MemoryError with @debug.Debug::{to_repr}
 
 ///|
 /// The kind and the type of an import or an export.
+#derive(Eq, Debug)
 pub(all) enum ExternKind {
   /// A function; `None` when its signature has a type other than the four number types.
   Function(Signature?)
@@ -363,7 +378,7 @@ pub(all) enum ExternKind {
   Memory
   Global
   Tag
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ExternKind with Eq::{equal, not_equal}
@@ -372,11 +387,12 @@ pub extend ExternKind with Eq::{equal, not_equal}
 pub extend ExternKind with @debug.Debug::{to_repr}
 
 ///|
+#derive(Eq, Debug)
 pub(all) struct ImportDescriptor {
   module_ : String
   name : String
   kind : ExternKind
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ImportDescriptor with Eq::{equal, not_equal}
@@ -385,10 +401,11 @@ pub extend ImportDescriptor with Eq::{equal, not_equal}
 pub extend ImportDescriptor with @debug.Debug::{to_repr}
 
 ///|
+#derive(Eq, Debug)
 pub(all) struct ExportDescriptor {
   name : String
   kind : ExternKind
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ExportDescriptor with Eq::{equal, not_equal}

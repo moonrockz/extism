@@ -1,6 +1,7 @@
 name = "moonrockz/extism-site"
 
 // Tooling must never publish. The pinned toolchain rejects private publication.
+
 private = true
 
 version = "0.1.1"

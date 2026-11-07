@@ -1,11 +1,12 @@
 ///|
 /// A call of a denied Extism host function: the function and, for `http_request`, the method and the
 /// URL of the refused request.
+#derive(Eq, Debug)
 pub(all) struct DeniedCall {
   function : String
   method_ : String?
   url : String?
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend DeniedCall with Eq::{equal, not_equal}
@@ -15,10 +16,11 @@ pub extend DeniedCall with @debug.Debug::{to_repr}
 
 ///|
 /// The memory whose ceiling refused a grow.
+#derive(Eq, Debug)
 pub(all) enum MemoryKind {
   PluginMemory
   KernelMemory
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend MemoryKind with Eq::{equal, not_equal}
@@ -28,6 +30,7 @@ pub extend MemoryKind with @debug.Debug::{to_repr}
 
 ///|
 /// An error of a plugin call.
+#derive(Debug)
 pub(all) suberror CallError {
   /// The export returned a code that is not 0, or set an error: the code and the error text.
   Plugin(Int32, String)
@@ -47,7 +50,7 @@ pub(all) suberror CallError {
   Initialization(@engine.CallError)
   /// The plugin exports no function with this name.
   UnknownExport(String)
-} derive(Debug)
+}
 
 ///|
 pub extend CallError with @debug.Debug::{to_repr}
@@ -299,7 +302,7 @@ fn PluginState::http_request(
   // The policy comes first, so a denied call is Denied whatever the plugin gives. The method and the
   // URL are in the denial when the request can be read.
   guard self.policy.http is Handler(handler) else {
-    let request = try Some(http_request_of(self.text(handle_arg(args, 0)))) catch {
+    let request = Some(http_request_of(self.text(handle_arg(args, 0)))) catch {
       _ => None
     }
     raise self.stop(
@@ -444,7 +447,10 @@ pub fn Plugin::load(
               raise state.stop(HostFunction(function.label(), message))
             Exit(code) =>
               raise state.stop(
-                HostFunction(function.label(), "the function exits with \{code}"),
+                HostFunction(
+                  function.label(),
+                  "the function exits with \{code}",
+                ),
               )
           }
         })
@@ -528,15 +534,13 @@ fn Plugin::initialize(self : Plugin) -> Unit raise CallError {
   }
   self.initialized = true
   let run = (name : String, args : Array[@engine.Value]) => {
-    (
-      self.instance.call(
-        name,
-        args,
-        budget?=self.limits.budget,
-        deadline?=self.limits.deadline,
-      )
-      |> ignore
-    ) catch {
+    (self.instance.call(
+      name,
+      args,
+      budget?=self.limits.budget,
+      deadline?=self.limits.deadline,
+    )
+    |> ignore) catch {
       error => raise Initialization(error)
     }
   }

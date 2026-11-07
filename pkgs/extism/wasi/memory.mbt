@@ -1,8 +1,9 @@
 ///|
 /// A guest memory access outside the memory: the offset and the length.
+#derive(Eq, Debug)
 pub(all) suberror GuestMemoryError {
   OutOfBounds(Int64, Int32)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend GuestMemoryError with Eq::{equal, not_equal}
@@ -48,7 +49,7 @@ fn[M : GuestMemory] write_u64(
 
 ///|
 /// The most iovecs that one call takes.
-pub let max_iovecs : Int = 1024
+pub let max_iovecs : Int32 = 1024
 
 ///|
 /// Whether `length` bytes at `offset` are inside the memory.
@@ -67,7 +68,7 @@ fn[M : GuestMemory] iovecs(
 ) -> Array[(Int64, Int64)]? raise GuestMemoryError {
   guard count <= max_iovecs.to_int64() else { return None }
   let entries = memory.read(at, (8L * count).to_int())
-  let word = (i : Int) => {
+  let word = (i : Int32) => {
     entries[i].to_int64() |
     (entries[i + 1].to_int64() << 8) |
     (entries[i + 2].to_int64() << 16) |

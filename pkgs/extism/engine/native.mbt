@@ -37,7 +37,6 @@ extern "C" fn wamr_caller(caller : UInt64) -> InstanceHandle = "extism_wamr_call
 ///|
 extern "C" fn wamr_take_freed() -> Int64 = "extism_wamr_take_freed"
 
-
 ///|
 extern "C" fn wamr_linker_host(
   linker : UInt64,
@@ -181,7 +180,7 @@ fn release_freed() -> Unit {
 
 ///|
 /// The number of entries in the host function table, after the entries of freed instances go.
-pub fn host_entry_count() -> Int {
+pub fn host_entry_count() -> Int32 {
   release_freed()
   host_entries.length()
 }
@@ -193,7 +192,7 @@ fn dispatch(host_id : Int32, cells : UInt64, caller : UInt64) -> Int32 {
     from_cell(t, wamr_cell_get(cells, i))
   })
   let memory : Memory? = if entry.has_memory {
-    Some({ handle: wamr_caller(caller) })
+    Some({ handle: wamr_caller(caller), })
   } else {
     None
   }
@@ -299,7 +298,7 @@ fn backend_instantiate(
     let symbol = wamr_register(@utf8.encode(module_name), @utf8.encode(name))
     match kind {
       Host(signature, function) => {
-        host_entries[id] = { signature, function, has_memory }
+        host_entries[id] = { signature, function, has_memory, }
         wamr_linker_host(linker, index, symbol, id)
         id += 1
       }

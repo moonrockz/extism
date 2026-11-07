@@ -4,10 +4,11 @@ pub let import_namespace : String = "wasi_snapshot_preview1"
 
 ///|
 /// A core WASM type of a preview 1 function.
+#derive(Eq, Debug)
 pub(all) enum WasiType {
   I32
   I64
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend WasiType with Eq::{equal, not_equal}
@@ -17,6 +18,7 @@ pub extend WasiType with @debug.Debug::{to_repr}
 
 ///|
 /// The 46 functions of `wasi_snapshot_preview1`, in the order of the witx.
+#derive(Eq, Debug)
 pub(all) enum Function {
   ArgsGet
   ArgsSizesGet
@@ -64,7 +66,7 @@ pub(all) enum Function {
   SockRecv
   SockSend
   SockShutdown
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Function with Eq::{equal, not_equal}
@@ -249,6 +251,7 @@ pub fn Function::results(self : Function) -> Array[WasiType] {
 ///|
 /// The answer of the sandbox to a function, as `README.mbt.md` documents it. A function with an fd
 /// argument other than 0, 1 and 2 returns `EBADF` first.
+#derive(Eq, Debug)
 pub(all) enum Answer {
   /// Zero entries and success.
   NoEntries
@@ -264,7 +267,7 @@ pub(all) enum Answer {
   Ends
   /// `ENOTCAPABLE`.
   NotCapable
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Answer with Eq::{equal, not_equal}

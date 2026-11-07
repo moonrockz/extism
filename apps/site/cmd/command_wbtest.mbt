@@ -1,7 +1,7 @@
 ///|
 test "each command name parses to its command" {
-  assert_eq(Invocation::parse(["build"]), { command: Build, json: false })
-  assert_eq(Invocation::parse(["check"]), { command: Check, json: false })
+  assert_eq(Invocation::parse(["build"]), { command: Build, json: false, })
+  assert_eq(Invocation::parse(["check"]), { command: Check, json: false, })
   assert_eq(Invocation::parse(["serve"]), {
     command: Serve(Port::default()),
     json: false,

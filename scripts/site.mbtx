@@ -18,11 +18,12 @@ import {
 /// root. The exit status is the status of the driver, or 2 for a usage error.
 
 ///|
+#derive(Eq, Debug)
 enum Step {
   Build
   Check
   Serve
-} derive(Eq, Debug)
+}
 
 ///|
 fn Step::parse(name : String) -> Step? {

@@ -10,7 +10,7 @@ pub let exit_request : String = "{\"jsonrpc\":\"2.0\",\"method\":\"morphir.exit\
 /// One exchange of the `morphir/byte-adapter/v1-draft` ABI: the code that `handle` returns, and the
 /// bytes that the guest gave through `output_byte`.
 pub(all) struct Exchange {
-  code : Int
+  code : Int32
   output : Bytes
 }
 
@@ -29,12 +29,10 @@ pub fn Guest::load(module_ : Bytes) -> Guest raise @engine.EngineError {
   let input : Ref[Bytes] = Ref(b"")
   let output : Array[Byte] = []
   let imports = @engine.Imports::new()
-    .host(
-      "morphir_bytes_v1",
-      "input_len",
-      @engine.Signature::new([], [I32]),
-      (_, _) => [I32(input.val.length())],
-    )
+    .host("morphir_bytes_v1", "input_len", @engine.Signature::new([], [I32]), (
+      _,
+      _,
+    ) => [I32(input.val.length())])
     .host(
       "morphir_bytes_v1",
       "input_byte",
@@ -59,7 +57,7 @@ pub fn Guest::load(module_ : Bytes) -> Guest raise @engine.EngineError {
       },
     )
   let instance = @engine.Engine::default().compile(module_).instantiate(imports)
-  { instance, input, output }
+  { instance, input, output, }
 }
 
 ///|
@@ -74,5 +72,5 @@ pub fn Guest::exchange(
     [I32(code)] => code
     _ => -1
   }
-  { code, output: Bytes::from_array(self.output) }
+  { code, output: Bytes::from_array(self.output), }
 }

@@ -4,10 +4,11 @@ pub let import_namespace : String = "extism:host/env"
 
 ///|
 /// A WASM value type of the kernel ABI. The kernel uses no other type.
+#derive(Eq, Debug)
 pub(all) enum KernelType {
   I32
   I64
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend KernelType with Eq::{equal, not_equal}
@@ -18,6 +19,7 @@ pub extend KernelType with @debug.Debug::{to_repr}
 ///|
 /// The 20 functions of the upstream Extism kernel, which the kernel module exports with their upstream
 /// names and signatures.
+#derive(Eq, Debug)
 pub(all) enum KernelFunction {
   Alloc
   Free
@@ -39,7 +41,7 @@ pub(all) enum KernelFunction {
   ErrorSet
   ErrorGet
   MemoryBytes
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend KernelFunction with Eq::{equal, not_equal}
