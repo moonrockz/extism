@@ -4,7 +4,7 @@ name = "moonrockz/extism-site"
 
 private = true
 
-version = "0.1.1"
+version = "0.2.0"
 
 import {
   "moonbitlang/async@0.22.7",

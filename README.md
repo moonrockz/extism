@@ -3,9 +3,20 @@
 An [Extism](https://extism.org) host for MoonBit. A MoonBit program on native, Node.js or a browser
 loads an Extism plugin, calls its exports and gets the results, with limits on memory and time.
 
-> [!NOTE]
-> No version is published yet. The OpenSpec change
-> [`host-extism-plugins`](openspec/changes/host-extism-plugins/) gives the requirements and the design.
+The current version is 0.2.0, on [mooncakes.io](https://mooncakes.io/docs/moonrockz/extism). The
+OpenSpec change [`host-extism-plugins`](openspec/changes/host-extism-plugins/) gives the requirements
+and the design.
+
+## Requirements
+
+`moonrockz/extism` 0.2.0 requires MoonBit 0.10.20 or newer (`moonc v0.10.20+65efd5b93`,
+`moon 0.1.20261104`). MoonBit 0.10.18 and older are no longer supported: the source uses the
+`#derive(...)` attribute of 0.10.20, and 0.10.18 ignores it. A project that stays on MoonBit 0.10.18
+keeps `moonrockz/extism` 0.1.1.
+
+```shell
+moon add moonrockz/extism@0.2.0
+```
 
 ## Packages
 
