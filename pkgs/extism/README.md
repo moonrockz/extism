@@ -11,7 +11,11 @@ has its own README.
 | `moonrockz/extism/wasi` | A WASI preview 1 sandbox for plugins | all |
 | `moonrockz/extism/engine` | A small WASM engine layer: WAMR on native, `WebAssembly` on js | native, js |
 
-No version is published yet.
+## Requirements
+
+Version 0.2.0 requires MoonBit 0.10.20 or newer (`moonc v0.10.20+65efd5b93`, `moon 0.1.20261104`).
+MoonBit 0.10.18 and older are no longer supported: the source uses the `#derive(...)` attribute of
+0.10.20, and 0.10.18 ignores it. A project that stays on MoonBit 0.10.18 keeps version 0.1.1.
 
 ## Third-party code
 
