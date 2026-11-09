@@ -8,11 +8,12 @@
  *   either a MoonBit host function (called through the callback that extism_wamr_init stores) or an
  *   exported function of another instance (called directly, with that instance's execution
  *   environment, so a kernel call does not cross into MoonBit and does not count against the budget).
- * - A call can have an instruction budget (wasm_runtime_set_instruction_count_limit) and a deadline: a
- *   watchdog thread calls wasm_runtime_terminate when the deadline passes. The watchdog is always
- *   cancelled and joined before extism_wamr_call returns, and before the call reads the exception. When
- *   the watchdog fired after the guest returned, the call clears the exception, so the next call does
- *   not see it.
+ * - A call can have an instruction budget (wasm_runtime_set_instruction_count_limit64, a 64-bit count
+ *   that the vendored patch adds, see UPSTREAM.md; int64_t on every platform, never a C long, which has
+ *   32 bits on Windows) and a deadline: a watchdog thread calls wasm_runtime_terminate when the
+ *   deadline passes. The watchdog is always cancelled and joined before extism_wamr_call returns,
+ *   and before the call reads the exception. When the watchdog fired after the guest returned, the
+ *   call clears the exception, so the next call does not see it.
  * - The host functions of an instance have a range of ids in the MoonBit host table. The instance
  *   finalizer records the range as freed, and MoonBit removes those entries, so the table holds the
  *   functions of live instances only. A host function gets its calling instance as an argument.
@@ -808,7 +809,7 @@ extism_wamr_test_stop_delay(int32_t microseconds)
 }
 
 int32_t
-extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, int32_t budget,
+extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, int64_t budget,
                  int32_t deadline_ms)
 {
   InstanceData *data = object->data;
@@ -823,7 +824,7 @@ extism_wamr_call(InstanceObject *object, moonbit_bytes_t name, uint64_t *cells, 
     return EXTISM_STATUS_ARITY;
   }
   data->host_failed = 0;
-  wasm_runtime_set_instruction_count_limit(data->env, budget > 0 ? budget : -1);
+  wasm_runtime_set_instruction_count_limit64(data->env, budget > 0 ? budget : -1);
   Watchdog watchdog;
   int watching = deadline_ms > 0 && deadline_supported
                  && watchdog_start(&watchdog, deadline_ms, data->instance);

@@ -1877,6 +1877,18 @@ wasm_runtime_set_instruction_count_limit(wasm_exec_env_t exec_env,
                                          int instruction_count);
 
 /**
+ * moonrockz/extism (UPSTREAM.md): set the instruction count limit as
+ * wasm_runtime_set_instruction_count_limit does, with a 64-bit count, so that
+ * a limit can be larger than INT32_MAX. A negative count means no limit.
+ *
+ * @param exec_env the execution environment
+ * @param instruction_count the instruction count limit
+ */
+WASM_RUNTIME_API_EXTERN void
+wasm_runtime_set_instruction_count_limit64(wasm_exec_env_t exec_env,
+                                           int64_t instruction_count);
+
+/**
  * Dump runtime memory consumption, including:
  *     Exec env memory consumption
  *     WASM module memory consumption

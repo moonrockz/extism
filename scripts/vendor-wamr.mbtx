@@ -387,6 +387,70 @@ let patches : Array[Patch] = [
       ),
     ],
   },
+  {
+    file: "iwasm/common/wasm_exec_env.h",
+    reason: "64-bit instruction counter. WAMR holds the instruction limit in a C `int` " +
+    "(WASMExecEnv.instructions_to_execute, the interpreter's local instructions_left, and the " +
+    "parameter of wasm_runtime_set_instruction_count_limit), so a budget is at most 2147483647. The " +
+    "patch makes the field and the local `int64`, and adds wasm_runtime_set_instruction_count_limit64, " +
+    "which takes an int64_t; the `int` function stays as it is, so its ABI does not change. The " +
+    "fields of WASMExecEnv that AOT code reads by offset come before the counter, and AOT and JIT do " +
+    "not read it. The engine builds the fast interpreter only (extism_config.h), and the vendored " +
+    "source has no wasm_interp_classic.c, so the patch changes only wasm_interp_fast.c; an upstream " +
+    "change also needs the same local in wasm_interp_classic.c. Upstream has no 64-bit counter at " +
+    "WAMR-2.4.5 and at main ffc22889948b1f063d7258d34d4e636ee0914925 (2026-11-06) alike; pull request " +
+    "#4902 (resume after the limit) is open and not merged.",
+    hunks: [
+      (
+        "    /* instructions to execute */\n    int instructions_to_execute;\n",
+        "    /* instructions to execute */\n    /* moonrockz/extism: a 64-bit counter (UPSTREAM.md). */\n    int64 instructions_to_execute;\n",
+      ),
+    ],
+  },
+  {
+    file: "iwasm/interpreter/wasm_interp_fast.c",
+    reason: "64-bit instruction counter: the local counter of the interpreter (see wasm_exec_env.h).",
+    hunks: [
+      (
+        "    int instructions_left = -1;\n", "    /* moonrockz/extism: a 64-bit counter (UPSTREAM.md). */\n    int64 instructions_left = -1;\n",
+      ),
+    ],
+  },
+  {
+    file: "iwasm/include/wasm_export.h",
+    reason: "64-bit instruction counter: the declaration of wasm_runtime_set_instruction_count_limit64 (see wasm_exec_env.h).",
+    hunks: [
+      (
+        "WASM_RUNTIME_API_EXTERN void\nwasm_runtime_set_instruction_count_limit(wasm_exec_env_t exec_env,\n                                         int instruction_count);\n",
+        "WASM_RUNTIME_API_EXTERN void\nwasm_runtime_set_instruction_count_limit(wasm_exec_env_t exec_env,\n                                         int instruction_count);\n" +
+        "\n/**\n * moonrockz/extism (UPSTREAM.md): set the instruction count limit as\n * wasm_runtime_set_instruction_count_limit does, with a 64-bit count, so that\n * a limit can be larger than INT32_MAX. A negative count means no limit.\n *\n * @param exec_env the execution environment\n * @param instruction_count the instruction count limit\n */\n" +
+        "WASM_RUNTIME_API_EXTERN void\nwasm_runtime_set_instruction_count_limit64(wasm_exec_env_t exec_env,\n                                           int64_t instruction_count);\n",
+      ),
+    ],
+  },
+  {
+    file: "iwasm/common/wasm_runtime_common.h",
+    reason: "64-bit instruction counter: the internal declaration of wasm_runtime_set_instruction_count_limit64 (see wasm_exec_env.h).",
+    hunks: [
+      (
+        "WASM_RUNTIME_API_EXTERN void\nwasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,\n                                         int instructions_to_execute);\n",
+        "WASM_RUNTIME_API_EXTERN void\nwasm_runtime_set_instruction_count_limit(WASMExecEnv *exec_env,\n                                         int instructions_to_execute);\n" +
+        "\n/* moonrockz/extism: a 64-bit count (UPSTREAM.md). See wasm_export.h for description */\n" +
+        "WASM_RUNTIME_API_EXTERN void\nwasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,\n                                           int64 instructions_to_execute);\n",
+      ),
+    ],
+  },
+  {
+    file: "iwasm/common/wasm_runtime_common.c",
+    reason: "64-bit instruction counter: the definition of wasm_runtime_set_instruction_count_limit64 (see wasm_exec_env.h).",
+    hunks: [
+      (
+        "    exec_env->instructions_to_execute = instructions_to_execute;\n}\n",
+        "    exec_env->instructions_to_execute = instructions_to_execute;\n}\n" +
+        "\n/* moonrockz/extism: a 64-bit count (UPSTREAM.md). */\nvoid\nwasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,\n                                           int64 instructions_to_execute)\n{\n    exec_env->instructions_to_execute = instructions_to_execute;\n}\n",
+      ),
+    ],
+  },
 ]
 
 ///|
@@ -475,6 +539,47 @@ test "the atomics patch gives MSVC lock-free 32-bit atomics and keeps the GCC an
   assert_true(
     after.contains(
       "#elif BH_ATOMIC_32_IS_ATOMIC != 0\n\n#define BH_ATOMIC_32_LOAD(v) __atomic_load_n(",
+    ),
+  )
+}
+
+///|
+test "the counter patch makes the instruction counter 64-bit and keeps the int function" {
+  let patched = (file : String) => {
+    let before = patches
+      .iter()
+      .filter(p => p.file == file)
+      .flat_map(p => p.hunks.iter().map(h => h.0))
+      .collect()
+      .join("\n")
+    patch(file, before)
+  }
+  let env = patched("iwasm/common/wasm_exec_env.h")
+  assert_true(env.contains("    int64 instructions_to_execute;\n"))
+  assert_false(env.contains("    int instructions_to_execute;"))
+  let interp = patched("iwasm/interpreter/wasm_interp_fast.c")
+  assert_true(interp.contains("    int64 instructions_left = -1;\n"))
+  assert_false(interp.contains("    int instructions_left = -1;"))
+  let api = patched("iwasm/include/wasm_export.h")
+  assert_true(
+    api.contains(
+      "wasm_runtime_set_instruction_count_limit(wasm_exec_env_t exec_env,\n                                         int instruction_count);",
+    ),
+  )
+  assert_true(
+    api.contains(
+      "wasm_runtime_set_instruction_count_limit64(wasm_exec_env_t exec_env,\n                                           int64_t instruction_count);",
+    ),
+  )
+  let header = patched("iwasm/common/wasm_runtime_common.h")
+  assert_true(
+    header.contains("int64 instructions_to_execute);") &&
+    header.contains("int instructions_to_execute);"),
+  )
+  let source = patched("iwasm/common/wasm_runtime_common.c")
+  assert_true(
+    source.contains(
+      "wasm_runtime_set_instruction_count_limit64(WASMExecEnv *exec_env,\n                                           int64 instructions_to_execute)\n{",
     ),
   )
 }

@@ -26,6 +26,49 @@ test "Runaway loop on native: a budget of 1,000,000 instructions stops the call"
 }
 
 ///|
+/// Whether `spin_n(n)` completes with a budget of `instructions`, on a new instance.
+fn spin_n_completes(n : Int32, instructions : Int64) -> Bool raise {
+  let instance = compile(@fixtures.spin_n()).instantiate(@engine.Imports::new())
+  let budget = @engine.Budget::parse(instructions)
+  try instance.call("spin_n", [I32(n)], budget~) catch {
+    BudgetExhausted => false
+    error => raise error
+  } noraise {
+    _ => true
+  }
+}
+
+///|
+/// The least budget with which `spin_n(n)` completes, for a small `n`.
+fn least_budget(n : Int32) -> Int64 raise {
+  let mut low = 1L
+  let mut high = 1000000L
+  while low < high {
+    let middle = (low + high) / 2L
+    if spin_n_completes(n, middle) {
+      high = middle
+    } else {
+      low = middle + 1L
+    }
+  }
+  low
+}
+
+///|
+test "Budget above 2^31 on native: a call runs with its exact budget and stops with one less" {
+  // spin_n(n) costs k * n + c metered instructions. c is 1 more with the switch dispatch than with
+  // computed goto, so the test measures k and c with small budgets.
+  let k = least_budget(2) - least_budget(1)
+  let c = least_budget(1) - k
+  assert_eq(least_budget(1000), k * 1000L + c)
+  let n = ((2147483648L + 1000000L - c) / k + 1L).to_int()
+  let exact = k * n.to_int64() + c
+  assert_true(n > 0 && exact > 2147483648L + 1000000L)
+  assert_true(spin_n_completes(n, exact))
+  assert_false(spin_n_completes(n, exact - 1L))
+}
+
+///|
 test "Deadline on native: a loop with a 100 ms deadline stops within 1 second" {
   let instance = spin_instance()
   let deadline = @engine.Deadline::parse(100)

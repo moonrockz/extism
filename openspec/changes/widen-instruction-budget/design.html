@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>widen-instruction-budget: design</title>
+<!--
+  Agent document template (docs/templates/agent-document.html). Specs, plans and reports that a person reviews
+  start from this file: copy it, keep the <head> as it is, and write the content inside <main>.
+  Styles and scripts are files in docs/templates/assets/, referenced and not embedded. In a copy, change the
+  "assets/" prefix of each href and src to the relative path from the copy to that directory, for example
+  "../../docs/templates/assets/" from .dev/beads-specs/. See AGENTS.md, "Specs and plans are HTML documents".
+  Code goes in <pre><code class="language-moonbit"> (or scheme, toml, json, bash, diff). Give sections an id and
+  list them in nav.toc.
+-->
+<link rel="stylesheet" href="../../../docs/templates/assets/agent-document.css">
+<link rel="stylesheet" href="../../../docs/templates/assets/highlight/styles/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="../../../docs/templates/assets/highlight/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="../../../docs/templates/assets/highlight/highlight.min.js"></script>
+<script defer src="../../../docs/templates/assets/highlight/languages/scheme.min.js"></script>
+<script defer src="../../../docs/templates/assets/agent-document.js"></script>
+</head>
+<body>
+<main>
+<h1>widen-instruction-budget: design</h1>
+<p class="meta">OpenSpec change · Bead <code>morphir-ukvn.5.64.36.33</code> · 2026-11-08 · proposed</p>
+
+<nav class="toc" aria-label="Contents">
+<ul>
+<li><a href="#context">Context</a></li>
+<li><a href="#goals">Goals and non-goals</a></li>
+<li><a href="#upstream">Upstream WAMR</a></li>
+<li><a href="#decisions">Decisions</a></li>
+<li><a href="#tests">Tests</a></li>
+<li><a href="#risks">Risks and trade-offs</a></li>
+<li><a href="#migration">Migration plan</a></li>
+<li><a href="#open-questions">Open questions</a></li>
+</ul>
+</nav>
+
+<h2 id="context">Context</h2>
+<p>The native engine sets the budget of a call with <code>wasm_runtime_set_instruction_count_limit</code>
+(<code>host-extism-plugins</code>, ENG-4). WAMR holds the limit in a C <code>int</code> in three places: the field
+<code>WASMExecEnv.instructions_to_execute</code>, the local <code>instructions_left</code> of the interpreter, and the
+parameter of the function. Thus <code>Budget::parse</code> refuses a budget above 2147483647. The Morphir model line
+in <code>finos/morphir-moonbit</code> needs 5,000,000,000 instructions for one call on a large model.</p>
+<p>The interpreter copies the limit into its local counter when a call enters it, and decrements only the local. A
+negative limit means no limit. When the local is 0, the call stops with the exception "instruction limit
+exceeded", which the stub maps to <code>BudgetExhausted</code>.</p>
+
+<h2 id="goals">Goals and non-goals</h2>
+<ul>
+<li>Goal: a budget of at least 5,000,000,000 instructions, enforced exactly on native, on every platform and with
+every C compiler that builds the engine.</li>
+<li>Goal: a small vendored patch that a new vendor run keeps, and that upstream can take.</li>
+<li>Goal: the smallest API change. <code>Budget::parse(Int64)</code> keeps its signature.</li>
+<li>Non-goal: a budget on js, a budget across calls or host re-entries, the classic interpreter, AOT and JIT.</li>
+</ul>
+
+<h2 id="upstream">Upstream WAMR</h2>
+<table>
+<thead><tr><th>Item</th><th>State on 2026-11-08</th><th>Use for this change</th></tr></thead>
+<tbody>
+<tr><td><code>WAMR-2.4.5</code> and <code>main</code> <code>ffc22889</code> (2026-11-06)</td><td>The field, the local
+of the fast and the classic interpreter, and the API parameter are <code>int</code></td><td>No 64-bit counter
+exists</td></tr>
+<tr><td>Pull request #4902, "Implement instruction metering resume"</td><td>Open since 2026-04-02, not merged. It
+adds <code>wasm_runtime_resume_wasm</code> and changes both interpreters a lot</td><td>A refill in steps of
+2147483647 would need it. Issue #4410 (resume corrupts the state) is open. Not usable</td></tr>
+<tr><td>Issue #5139</td><td>Open. It asks for documentation: the limit is read when a call enters the interpreter,
+and it applies to each entry</td><td>No fix. It does not affect this engine: MoonBit host functions do not call
+back into the guest, and kernel calls run on the kernel's own execution environment</td></tr>
+<tr><td>Pull request #5141 (merged after <code>WAMR-2.4.5</code>)</td><td>Meters the switch dispatch</td><td>The
+vendored source has the same fix as a patch</td></tr>
+</tbody>
+</table>
+<p>AOT code reads some fields of <code>WASMExecEnv</code> by offset: <code>module_inst</code>,
+<code>argv_buf</code>, <code>native_stack_boundary</code>, <code>suspend_flags</code>,
+<code>aux_stack_boundary</code>, <code>aux_stack_bottom</code> and <code>native_symbol</code>. All of them come
+before <code>instructions_to_execute</code>, so a wider counter moves no field that AOT code reads. AOT and JIT do
+not read the counter.</p>
+
+<h2 id="decisions">Decisions</h2>
+
+<h3 id="cnt-1">CNT-1. A 64-bit counter in the vendored WAMR (Owner)</h3>
+<p>The patch "64-bit instruction counter" in <code>scripts/vendor-wamr.mbtx</code> has five hunks:</p>
+<ul>
+<li><code>core/iwasm/common/wasm_exec_env.h</code>: <code>int instructions_to_execute</code> becomes
+<code>int64</code>.</li>
+<li><code>core/iwasm/interpreter/wasm_interp_fast.c</code>: <code>int instructions_left</code> becomes
+<code>int64</code>.</li>
+<li><code>core/iwasm/include/wasm_export.h</code>, <code>core/iwasm/common/wasm_runtime_common.h</code> and
+<code>.c</code>: a new function <code>wasm_runtime_set_instruction_count_limit64</code>.</li>
+</ul>
+<pre><code class="language-c">WASM_RUNTIME_API_EXTERN void
+wasm_runtime_set_instruction_count_limit64(wasm_exec_env_t exec_env,
+                                           int64_t instruction_count);
+</code></pre>
+<p>The <code>int</code> function stays as it is, so the ABI does not change for other users of WAMR, for example
+language bindings that call it with a C <code>int</code>. It writes into the wider field, and the sign extension
+keeps -1 as "no limit". The engine builds the fast interpreter only (<code>extism_config.h</code>), and the vendor
+script copies no <code>wasm_interp_classic.c</code>, so the patch changes only the fast interpreter. A pull request
+to upstream also changes the same local in <code>wasm_interp_classic.c</code> and the comment of the API.</p>
+<p>Alternatives: a refill with #4902 (not merged, see above); a host-side count across chunks (not possible: a call
+that reaches the limit cannot continue); a change of the <code>int</code> parameter to <code>int64_t</code> (smaller,
+but it breaks binary callers).</p>
+
+<h3 id="cnt-2">CNT-2. The budget range is 1 to the Int64 maximum (Owner)</h3>
+<p><code>Budget::parse</code> accepts 1 to 9223372036854775807. The counter is a signed 64-bit integer and a negative
+value means no limit, so the engine can enforce every positive value. At about 1.4 × 10<sup>9</sup> metered
+instructions per second, the maximum is more than 200 years of run time, so a lower maximum protects nothing. A
+consumer that sends the budget through a JSON number or a JavaScript <code>Number</code> can set its own lower
+maximum, for example 2<sup>53</sup> − 1, and the engine needs no change for it.</p>
+
+<h3 id="cnt-3">CNT-3. The engine API change (Call)</h3>
+<pre><code class="language-moonbit">pub fn Budget::parse(instructions : Int64) -> Budget raise LimitError // unchanged signature
+pub fn Budget::instructions(self : Budget) -> Int64                 // was Int32
+</code></pre>
+<p>The extern <code>wamr_call</code> takes the budget as <code>Int64</code>, and the stub
+<code>extism_wamr_call</code> takes it as <code>int64_t</code>. MoonBit's <code>Int64</code> is
+<code>int64_t</code> in the native FFI on every platform. The path uses no C <code>long</code>, which has 32 bits on
+Windows (LLP64). No call path is cast to <code>int</code>.</p>
+
+<h2 id="tests">Tests</h2>
+<p>The fixture <code>spin_n(n)</code> runs a loop of <code>n</code> iterations. Its cost is <code>k × n + c</code>
+metered instructions: on macOS arm64 <code>k</code> is 3, and <code>c</code> is 2 with computed goto and 3 with the
+switch dispatch (as MSVC builds it). So the test measures <code>k</code> and <code>c</code> with a binary search on
+small budgets, checks the formula at <code>n</code> = 1000, and then selects the <code>n</code> whose cost is more
+than 2<sup>31</sup> + 1,000,000. The call completes with a budget of exactly that cost, and it stops with
+<code>BudgetExhausted</code> with 1 instruction less. With the <code>int</code> counter, the second call does not stop,
+because the value wraps to a negative count.</p>
+<p>The two long calls take about 3 s on macOS arm64. The whole test took about 20 s on
+<code>windows-latest</code> with MSVC (run 42549618598), below the limit of 60 s for each test in that workflow. The
+test runs in <code>mise run test</code> on native, in the
+switch-dispatch step of CI, and in the manual Windows MSVC workflow.</p>
+
+<h2 id="risks">Risks and trade-offs</h2>
+<table>
+<thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+<tbody>
+<tr><td>A 64-bit decrement is slower on a 32-bit host</td><td>The engine supports 64-bit hosts only. On macOS arm64,
+a loop of 700,000,000 iterations took 1506 to 1576 ms before and 1513 to 1537 ms after</td></tr>
+<tr><td>A new vendor run loses the patch</td><td>The patch is in <code>scripts/vendor-wamr.mbtx</code>, and a hunk
+that does not match its upstream text once stops the vendor run</td></tr>
+<tr><td>Upstream adds a different 64-bit API</td><td>At the next WAMR upgrade, use the upstream API and remove the
+patch</td></tr>
+<tr><td>The archive of this change before <code>host-extism-plugins</code> fails, because the requirement is not yet
+in <code>openspec/specs/</code></td><td>Archive <code>host-extism-plugins</code> first</td></tr>
+</tbody>
+</table>
+
+<h2 id="migration">Migration plan</h2>
+<p>Release 0.3.0 after the maintainer approves it. A caller that reads <code>Budget::instructions</code> changes its
+type to <code>Int64</code>. <code>finos/morphir-moonbit</code> calls only <code>Budget::parse</code>, and then moves
+<code>CallBounds.instructions</code> and <code>--instructions</code> to <code>Int64</code> in its own pull request.</p>
+
+<h2 id="open-questions">Open questions</h2>
+<ul>
+<li>The maintainer selects the maximum: the <code>Int64</code> maximum in this library (CNT-2), with a lower maximum
+in a consumer where it needs one. The design of this change does not depend on the answer.</li>
+<li>An upstream pull request with CNT-1 and the classic interpreter needs the maintainer's approval.</li>
+</ul>
+
+</main>
+</body>
+</html>

@@ -279,9 +279,15 @@ test "bytes that are not a module are invalid" {
 }
 
 ///|
-test "Budget range: 2147483647 is accepted and 2147483648 is refused" {
-  assert_eq(@engine.Budget::parse(2147483647L).instructions(), 2147483647)
-  assert_eq(@engine.Budget::parse(1L).instructions(), 1)
+test "Budget range: 1 to the Int64 maximum is accepted, 0 and -1 are refused" {
+  assert_eq(@engine.Budget::parse(1L).instructions(), 1L)
+  assert_eq(@engine.Budget::parse(2147483647L).instructions(), 2147483647L)
+  assert_eq(@engine.Budget::parse(2147483648L).instructions(), 2147483648L)
+  assert_eq(@engine.Budget::parse(5000000000L).instructions(), 5000000000L)
+  assert_eq(
+    @engine.Budget::parse(9223372036854775807L).instructions(),
+    9223372036854775807L,
+  )
   let refused = (n : Int64) => {
     try @engine.Budget::parse(n) catch {
       LimitError(name, value, rule) =>
@@ -290,8 +296,9 @@ test "Budget range: 2147483647 is accepted and 2147483648 is refused" {
       _ => false
     }
   }
-  assert_true(refused(2147483648L))
   assert_true(refused(0L))
+  assert_true(refused(-1L))
+  assert_true(refused(-9223372036854775808L))
 }
 
 ///|

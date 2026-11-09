@@ -81,7 +81,7 @@ pub struct Budget {
   // private fields
 }
 pub fn Budget::equal(Self, Self) -> Bool
-pub fn Budget::instructions(Self) -> Int32
+pub fn Budget::instructions(Self) -> Int64
 pub fn Budget::not_equal(Self, Self) -> Bool
 pub fn Budget::parse(Int64) -> Self raise LimitError
 pub fn Budget::to_repr(Self) -> @debug.Repr

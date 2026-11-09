@@ -1552,7 +1552,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     uint8 opcode = 0, local_type, *global_addr;
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
-    int instructions_left = -1;
+    /* moonrockz/extism: a 64-bit counter (UPSTREAM.md). */
+    int64 instructions_left = -1;
     if (exec_env) {
         instructions_left = exec_env->instructions_to_execute;
     }

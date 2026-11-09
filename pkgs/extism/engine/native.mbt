@@ -75,7 +75,7 @@ extern "C" fn wamr_call(
   instance : InstanceHandle,
   name : Bytes,
   cells : FixedArray[UInt64],
-  budget : Int32,
+  budget : Int64,
   deadline : Int32,
 ) -> Int32 = "extism_wamr_call"
 
@@ -372,7 +372,7 @@ fn backend_call(
     cells,
     match budget {
       Some(b) => b.instructions()
-      None => -1
+      None => -1L
     },
     match deadline {
       Some(d) => d.milliseconds()

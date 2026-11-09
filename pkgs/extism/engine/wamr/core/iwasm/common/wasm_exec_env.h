@@ -89,7 +89,8 @@ typedef struct WASMExecEnv {
 
 #if WASM_ENABLE_INSTRUCTION_METERING != 0
     /* instructions to execute */
-    int instructions_to_execute;
+    /* moonrockz/extism: a 64-bit counter (UPSTREAM.md). */
+    int64 instructions_to_execute;
 #endif
 
 #if WASM_ENABLE_FAST_JIT != 0
