@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Changed
+
+- **Breaking:** `moonrockz/extism/engine`: an instruction budget is now from 1 to 9223372036854775807
+  instructions (the `Int64` maximum), not from 1 to 2147483647. `Budget::parse` keeps its signature.
+  `Budget::instructions` returns `Int64`, not `Int32`. On native, the engine enforces every budget in
+  the range exactly, on every platform, including Windows. A caller that only uses `Budget::parse`
+  needs no change.
+- The vendored WAMR has a new patch, "64-bit instruction counter": the counter of the execution
+  environment and of the fast interpreter is a 64-bit integer, and the new function
+  `wasm_runtime_set_instruction_count_limit64` sets it. Upstream WAMR holds the counter in a C `int`.
+  `pkgs/extism/engine/wamr/UPSTREAM.md` gives the reason. The speed of the interpreter does not
+  change.
+
+### Repository
+
+- The OpenSpec change `widen-instruction-budget` gives the requirement and the design.
+
 ## 0.2.0
 
 A toolchain release. `moonrockz/extism` 0.2.0 requires MoonBit 0.10.20 or newer

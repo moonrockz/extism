@@ -126,10 +126,11 @@ pub fn PageCount::pages(self : PageCount) -> Int32 {
 }
 
 ///|
-/// An instruction budget for one call, from 1 to 2147483647 instructions (the C `int` of WAMR).
+/// An instruction budget for one call, from 1 to 9223372036854775807 instructions (the Int64
+/// maximum). The native engine counts in a 64-bit integer (wamr/UPSTREAM.md).
 #derive(Eq, Debug)
 pub struct Budget {
-  priv instructions : Int32
+  priv instructions : Int64
 }
 
 ///|
@@ -140,16 +141,16 @@ pub extend Budget with @debug.Debug::{to_repr}
 
 ///|
 pub fn Budget::parse(instructions : Int64) -> Budget raise LimitError {
-  guard instructions >= 1L && instructions <= 2147483647L else {
+  guard instructions >= 1L else {
     raise LimitError(
-      "instruction budget", instructions, "from 1 to 2147483647 instructions",
+      "instruction budget", instructions, "from 1 to 9223372036854775807 instructions",
     )
   }
-  { instructions: instructions.to_int(), }
+  { instructions, }
 }
 
 ///|
-pub fn Budget::instructions(self : Budget) -> Int32 {
+pub fn Budget::instructions(self : Budget) -> Int64 {
   self.instructions
 }
 

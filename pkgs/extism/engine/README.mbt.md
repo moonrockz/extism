@@ -19,7 +19,7 @@ of Node.js and browsers on js. It knows nothing of Extism.
 | --- | --- | --- |
 | Memory ceiling | Enforced: the maximum pages of the instantiation | Enforced: a rewrite of the memory maximum |
 | Refused `memory.grow` | `MemoryLimit` (enlarge-memory callback) | `MemoryLimit` (an appended grow function) |
-| Instruction budget | Enforced: WAMR metering, 1 to 2147483647 instructions | Not enforced |
+| Instruction budget | Enforced: WAMR metering, 1 to 9223372036854775807 instructions | Not enforced |
 | Deadline | Enforced: a watchdog thread calls `wasm_runtime_terminate`; it is always joined | Not enforced: end the worker |
 | Host work | Not metered: a host function and the kernel's forwarded calls count no instructions; the deadline bounds them | Not metered |
 | Features beyond the core set | `simd` (SIMDe headers) | `simd` |
