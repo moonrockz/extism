@@ -13,5 +13,6 @@
   `wasm_runtime_set_instruction_count_limit64` as an `int64_t`; verify the tests pass on native, on js and with
   `mise run test:switch-dispatch`
 - [x] 1.4 Compare the speed of a metered loop before and after the patch on macOS arm64
-- [ ] 1.5 Run the Windows MSVC workflow on the branch; verify the engine tests pass with MSVC
+- [x] 1.5 Run the Windows MSVC workflow on the branch; verify the engine tests pass with MSVC (run
+  42549618598)
 - [x] 1.6 Update the engine README, the CHANGELOG (`Unreleased`, breaking) and the design

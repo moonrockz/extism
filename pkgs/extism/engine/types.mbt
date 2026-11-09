@@ -140,6 +140,8 @@ pub extend Budget with Eq::{equal, not_equal}
 pub extend Budget with @debug.Debug::{to_repr}
 
 ///|
+/// Makes a budget of `instructions` for one call. It raises `LimitError` when `instructions` is less
+/// than 1. Every positive Int64 is a budget.
 pub fn Budget::parse(instructions : Int64) -> Budget raise LimitError {
   guard instructions >= 1L else {
     raise LimitError(
@@ -150,6 +152,7 @@ pub fn Budget::parse(instructions : Int64) -> Budget raise LimitError {
 }
 
 ///|
+/// The number of instructions of the budget, from 1 to 9223372036854775807.
 pub fn Budget::instructions(self : Budget) -> Int64 {
   self.instructions
 }

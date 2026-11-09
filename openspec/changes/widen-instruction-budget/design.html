@@ -129,7 +129,9 @@ small budgets, checks the formula at <code>n</code> = 1000, and then selects the
 than 2<sup>31</sup> + 1,000,000. The call completes with a budget of exactly that cost, and it stops with
 <code>BudgetExhausted</code> with 1 instruction less. With the <code>int</code> counter, the second call does not stop,
 because the value wraps to a negative count.</p>
-<p>The two long calls take about 3 s on macOS arm64. The test runs in <code>mise run test</code> on native, in the
+<p>The two long calls take about 3 s on macOS arm64. The whole test took about 20 s on
+<code>windows-latest</code> with MSVC (run 42549618598), below the limit of 60 s for each test in that workflow. The
+test runs in <code>mise run test</code> on native, in the
 switch-dispatch step of CI, and in the manual Windows MSVC workflow.</p>
 
 <h2 id="risks">Risks and trade-offs</h2>
