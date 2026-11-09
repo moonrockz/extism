@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.0
+
+A release with a larger instruction budget. On native, a budget can now be from 1 to
+9223372036854775807 instructions, not only up to 2147483647. `moonrockz/extism` 0.3.0 requires
+MoonBit 0.10.20 or newer (`moonc v0.10.20+65efd5b93`, `moon 0.1.20261104`), as 0.2.0 does. To
+upgrade, import `moonrockz/extism@0.3.0`. A caller that reads `Budget::instructions` changes the
+type of that value from `Int32` to `Int64`.
+
 ### Changed
 
 - **Breaking:** `moonrockz/extism/engine`: an instruction budget is now from 1 to 9223372036854775807

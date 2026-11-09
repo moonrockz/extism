@@ -18,7 +18,7 @@ so allocation, handles and errors are the same everywhere.
 
 ## Status
 
-Version 0.2.0 is published on [mooncakes.io](https://mooncakes.io/docs/moonrockz/extism). It requires
+Version 0.3.0 is published on [mooncakes.io](https://mooncakes.io/docs/moonrockz/extism). It requires
 MoonBit 0.10.20 or newer (`moonc v0.10.20+65efd5b93`, `moon 0.1.20261104`). MoonBit 0.10.18 and older
 are no longer supported. The first OpenSpec change, `host-extism-plugins`, gives the requirements and
 the design. It is in `openspec/changes/host-extism-plugins/` in the repository. The work is tracked in

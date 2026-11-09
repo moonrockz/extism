@@ -4,12 +4,12 @@ name = "moonrockz/extism-qualify"
 
 private = true
 
-version = "0.2.0"
+version = "0.3.0"
 
 import {
   "moonbitlang/async@0.22.7",
   "moonbitlang/x@0.5.6",
-  "moonrockz/extism@0.2.0",
+  "moonrockz/extism@0.3.0",
 }
 
 description = "The EXT-2 engine qualification gate of moonrockz/extism; excluded from publication"
